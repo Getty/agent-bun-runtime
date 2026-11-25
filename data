@@ -1,0 +1,43 @@
+---
+class: standard
+completed: 2026-11-25T11:29:31Z
+created: 2026-11-25T05:22:19Z
+depends_on:
+- 6
+id: 9
+priority: high
+started: 2026-11-25T05:37:14Z
+status: done
+tags:
+- phase-1
+- bootstrap
+- windows
+title: 'Phase 1: Windows starter getty-bun.ps1 and Git Bash forwarding'
+updated: 2026-11-25T11:29:40Z
+---
+
+Part of k2. Lane: getty-bun-windows-worker. bootstrap/getty-bun.ps1 for Windows PowerShell 5.1 and PowerShell 7 with the same commands, exit codes and status keys as getty-bun.sh; FileShare.None lock, staging, Directory.Move publish with bounded retry, System.Diagnostics.Process with raw byte copies of stdin and stdout, CommandLineToArgvW quoting, ZipFile extraction of the expected member only. Then the forwarding in getty-bun.sh under Git Bash, MSYS and Cygwin (after k7). Done: the scenario suite (k8) green under powershell and pwsh on windows-latest, scenario 11 included.
+
+2026-11-25 06:35 Part one: bootstrap/getty-bun.ps1 written to match the k7 sh starter (receipt contractVersion 1, three-line fast path, pin rendered, render --check exits 0 on both starters). Hub points built in: lock disposed after publish before Bun starts, CreateNoWindow, probe retry after 1 s in staging and after the move, windows-x64 -> baseline fallback on STATUS_ILLEGAL_INSTRUCTION with a fast path that tries x64 then baseline, starter ends when Bun ends even with host stdin open. Executed on pwsh 7.7.0 on Linux only: 28 unit checks and 23 whole-script tests green. Not run on Windows or 5.1 yet. Part two (Git Bash forwarding in getty-bun.sh) follows after the k7 fixes.
+
+2026-11-25 07:36 Round two: Git Bash forwarding implemented (forward_to_powershell plus a *_NT-* dispatch match), empty bun.exe is a mismatch, Windows reviewer S1-S4 done (bounded probe with kill and SetErrorMode, download stall limit via HttpWebRequest, SHA256 on a stream, first existing slot decides on the fast path), lock HResult check, DEL rejected, [type]::new on the fast path, README Windows section. pwsh 7 on Linux: 41 unit, 24 whole-script green; forwarding check 15/15 under dash, bash, busybox with fakes. CI 45565500890: Windows 58 pass, 2 fail (empty stdin, then-stub forwarding); real download under 5.1 passed.
+
+Commit d822139 on phase-1-bootstrap: Git Bash forwarding (MINGW/MSYS/CYGWIN/*_NT-*), Windows review fixes S1-S4 (bounded probe with kill, no error dialog, download stall limit, SHA256 on a stream, first existing slot decides, empty executable is a mismatch, lock errors classified). Both reviewers: go. CI run 45572032454. Next: file:// mirror regression, usage text under forwarding, README limits and evidence labels.
+
+Round 4 (uncommitted): ps1 file:// mirror fixed (HTTP-only properties only on HttpWebRequest; stall bound for every scheme), usage text without a file name, README mirror schemes per starter, AVX2-loss and AppLocker/WDAC limits, Git Bash exit-code placeholder (TODO k9, fill from scenario 11 data), evidence labels. Checks: pwsh 7.7 on Linux only (parse 0 errors, unit 43/43, script 24/24, forward-check 15/15). Windows and 5.1 wait for CI.
+
+Round 5 (uncommitted): README Git Bash exit-code TODO filled (executed, CI 45579886904: 0/1/2/7/42 unchanged; 256 -> 0 and 3221225477 -> 5 directly and through Git Bash, so Bun keeps the low 8 bits). Scenario 11 [stdin] NUL hang through Git Bash: the MSYS2 runtime source (3.6.10-5a1665c8) rules out ConPTY and handle replacement; remaining suspect, not checked: Git for Windows' bin/bash.exe wrapper starting usr/bin/bash.exe without STARTF_USESTDHANDLES when a console is present (git-wrapper.c 855-860). No forwarding change.
+
+Correction to the round-5 note: '256 -> 0 and 3221225477 -> 5, so Bun keeps the low 8 bits' was an inference about the observer, not the entry. Bun.spawn's exitCode on Windows is only the low byte of the real exit code (source-checked, Bun 1.4.5 src/spawn/process.rs). What codes above 255 become through the starter and Git Bash needs a 32-bit observer (PowerShell LASTEXITCODE); added to the suite in round 5. Codes 0/1/2/7/42 through Git Bash: executed, modulo 256.
+
+CI 45589361806 (3f6487a): the direct usr\bin\bash.exe empty-buffer case hangs too, so the wrapper is not the cause. Rows: under MSYS a NUL stdin is /dev/null; MSYS children read EOF, but a native powershell.exe started by MSYS blocks on a 1-byte stdin read; pcon off does not help; a pipe closed at once ends. 32-bit observer: process.exit(256) gives 0 and 3221225477 gives 5 already for bare bun.exe, so Bun 1.4.5 on Windows exits with the low byte itself. Round six: the forwarding gives PowerShell an empty pipe when fd 0 is a non-tty char device; README limit and TODO filled.
+
+f12fa1d (round six): CI 45597390051 green on all 10 jobs. The direct usr\bin\bash.exe NUL case and </dev/null inside Git Bash pass; [ -c /dev/stdin ] holds for an inherited NUL on MSYS 3.6.10; row d and all bin\bash.exe variants exit 0; no orphans at job end. Round seven (review nits, labels from this run) in progress.
+
+Commit 31a10b0: README NUL-stdin limit with CI evidence, crash exit codes per path (exec 2816/1024/2560/512/127 vs pipe 139/132/138/130/127 for a caller outside MSYS), mirror and Git Bash labels; sh comment only. Both reviewers GO; CI 45601335472 running. Left: README:517-519 update after this CI.
+
+CI 45601335472 on 31a10b0 green 10/10: </dev/null inside Git Bash returns 42 on all three Windows jobs; an MSYS-opened /dev/null does not block a raw powershell.exe (only the inherited NUL handle does). Recorded in commit 262bc95 (README + hook-cost wording), both reviewers GO; CI 45603412444 running.
+
+Windows starter and Git Bash forwarding done; reviewed GO by both reviewers through commit 262bc95. Closes with the PR #1 merge.
+
+Commits (git log 65c7dee..262bc95, getty-bun.ps1): 174fc8f a2c12da d822139; Git Bash forwarding in getty-bun.sh: d822139 f12fa1d 31a10b0. Landed on main by fast-forward to 262bc95 (PR 1).
