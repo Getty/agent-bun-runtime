@@ -57,7 +57,7 @@ try {
   const rows = [
     await timed("bare shell", shellCmd),
     await timed("bare Bun (slot Bun, same entry, no starter)", [slotBun(st.slot), "--no-install", entry]),
-    await timed(`direct exec form: ${STARTER} -File starter \`run\` (fast path)`, starterCmd(sb.root, ["run", "entries/hook.ts"])),
+    await timed((STARTER === "sh" ? "direct exec: sh starter `run` (fast path)" : `direct exec form: ${STARTER} -File starter \`run\` (fast path)`), starterCmd(sb.root, ["run", "entries/hook.ts"])),
   ];
   if (STARTER !== "sh") {
     // Codex runs commandWindows in its session shell, `powershell -NoProfile -Command <line>`

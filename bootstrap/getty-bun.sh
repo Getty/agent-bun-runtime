@@ -96,7 +96,7 @@ detect_target() {
 
 # The pin block of this file (format: bootstrap/README.md), for the detected target.
 read_pin() {
-  pin_version= pin_archive= pin_sha256= pin_member= _in=
+  pin_version='' pin_archive='' pin_sha256='' pin_member='' _in=''
   [ -r "$0" ] || fail "cannot read the starter $0 to find its pin"
   while IFS= read -r _l; do
     case $_l in
@@ -121,9 +121,10 @@ read_pin() {
 
 # --- slot --------------------------------------------------------------------------
 
-# state: ready (receipt version and target match the pin, bin/bun is executable),
-# missing (no slot), mismatch (anything else). Reads the first three lines of the
-# canonical receipt (bootstrap/README.md); no JSON parse, no hashing, no Bun start.
+# state: ready (receipt version and target match the pin, bin/bun is a non-empty
+# executable), missing (no slot), mismatch (anything else). Reads the first three lines
+# of the canonical receipt (bootstrap/README.md); no JSON parse, no hashing, no Bun start.
+# An empty bin/bun would "run" as an empty script with exit 0, so it is a mismatch.
 slot_state() {
   if [ ! -e "$slot" ] && [ ! -L "$slot" ]; then
     state=missing
@@ -131,10 +132,10 @@ slot_state() {
   fi
   state=mismatch
   if [ ! -f "$slot/receipt.json" ] || [ ! -r "$slot/receipt.json" ] ||
-    [ ! -f "$slot/bin/bun" ] || [ ! -x "$slot/bin/bun" ]; then
+    [ ! -f "$slot/bin/bun" ] || [ ! -x "$slot/bin/bun" ] || [ ! -s "$slot/bin/bun" ]; then
     return 0
   fi
-  _r1= _r2= _r3=
+  _r1='' _r2='' _r3=''
   {
     IFS= read -r _r1
     IFS= read -r _r2
@@ -190,9 +191,9 @@ one_line() {
 # _h: the SHA256 of file $1.
 sha256_of() {
   if [ "$hasher" = sha256sum ]; then
-    _h=$(sha256sum <"$1" 2>/dev/null) || fail "sha256sum failed on $1"
+    _h=$(sha256sum 2>/dev/null <"$1") || fail "sha256sum failed on $1"
   else
-    _h=$(shasum -a 256 <"$1" 2>/dev/null) || fail "shasum -a 256 failed on $1"
+    _h=$(shasum -a 256 2>/dev/null <"$1") || fail "shasum -a 256 failed on $1"
   fi
   _h=${_h%% *}
 }
@@ -254,11 +255,12 @@ install_locked() {
 
   url=$mirror/bun-v$pin_version/$pin_archive
   archive_file=$stage/archive.zip
+  # -q (first) and --no-config: no ~/.curlrc or wgetrc changes the download.
   if [ "$fetcher" = curl ]; then
-    _err=$(curl -fsS -L --connect-timeout 30 --speed-limit 1024 --speed-time 60 \
+    _err=$(curl -q -fsS -L --connect-timeout 30 --speed-limit 1024 --speed-time 60 \
       -o "$archive_file" "$url" 2>&1 9>&-)
   else
-    _err=$(wget -q -T 60 -O "$archive_file" "$url" 2>&1 9>&-)
+    _err=$(wget --no-config -q -T 60 -O "$archive_file" "$url" 2>&1 9>&-)
   fi
   _rc=$?
   [ "$_rc" -eq 0 ] || fail "download of $url failed ($fetcher exit $_rc): $(one_line "$_err")"
@@ -269,9 +271,9 @@ install_locked() {
 
   check_members
   mkdir -p -- "$stage/slot/bin" 2>/dev/null || fail "cannot create $stage/slot/bin"
-  unzip -p "$archive_file" "$pin_member" >"$stage/slot/bin/bun" 2>/dev/null 9>&- ||
+  unzip -p "$archive_file" "$pin_member" 2>/dev/null >"$stage/slot/bin/bun" 9>&- ||
     fail "cannot extract $pin_member from $url"
-  chmod 755 "$stage/slot/bin/bun" || fail "cannot chmod $stage/slot/bin/bun"
+  chmod 755 "$stage/slot/bin/bun" 2>/dev/null || fail "cannot chmod $stage/slot/bin/bun"
 
   _v=$("$stage/slot/bin/bun" --version 2>/dev/null 9>&-) ||
     fail "the Bun from $url does not run ($stage/slot/bin/bun --version failed); nothing was published"
@@ -282,7 +284,7 @@ install_locked() {
   _now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   printf '{\n  "version": "%s",\n  "target": "%s",\n  "archiveSha256": "%s",\n  "contractVersion": 1,\n  "archive": "%s",\n  "member": "%s",\n  "binarySha256": "%s",\n  "executable": "bin/bun",\n  "verifiedAt": "%s"\n}\n' \
     "$pin_version" "$target" "$pin_sha256" "$pin_archive" "$pin_member" "$_h" "$_now" \
-    >"$stage/slot/receipt.json" || fail "cannot write $stage/slot/receipt.json"
+    2>/dev/null >"$stage/slot/receipt.json" || fail "cannot write $stage/slot/receipt.json"
 
   mkdir -p -- "$bun_root/$pin_version" 2>/dev/null || fail "cannot create $bun_root/$pin_version"
   if [ -e "$slot" ] || [ -L "$slot" ]; then
@@ -340,7 +342,7 @@ write_installing() {
   json_string "$_comm"
   printf '{\n  "schemaVersion": 1,\n  "pid": %s,\n  "processName": %s,\n  "processStartToken": %s,\n  "installId": "%s",\n  "environmentId": %s,\n  "requestedVersion": "%s",\n  "target": "%s"\n}\n' \
     "$$" "$_json" "$_start" "${stage##*/}" "$_env" "$pin_version" "$target" \
-    >"$installing.$$" 2>/dev/null || fail "cannot write $installing.$$"
+    2>/dev/null >"$installing.$$" || fail "cannot write $installing.$$"
   mv -f -- "$installing.$$" "$installing" 2>/dev/null || fail "cannot write $installing"
 }
 
@@ -396,7 +398,7 @@ mirror=${mirror%/}
 detect_target
 read_pin
 
-bun_root=$home/runtimes/bun
+bun_root=${home%/}/runtimes/bun # GETTY_HOME=/ gives /runtimes, not //runtimes
 slot=$bun_root/$pin_version/$target
 lock_dir=$bun_root/.locks/$pin_version/$target
 lock=$lock_dir/.install.lock

@@ -30,8 +30,9 @@ exist: `getty-bun.sh` needs POSIX `sh`, `curl` or `wget`, `unzip`, `sha256sum` (
   `GETTY_BUN_LOCK_WAIT` (default 300 s), then re-check the slot. `.installing` is
   diagnostics, not ownership. Never delete a lock because a PID looks dead.
 - **Integrity.** SHA256 from the pin block, never from a file next to the archive.
-  Verify before unpacking; the archive must hold exactly the expected member, extracted
-  by name; `bun --version` must equal the pin before publishing.
+  Verify before unpacking; the archive must hold exactly the expected member plus the
+  directory entries of its parents (Bun's archives carry `bun-<target>/`), extracted by
+  name; `bun --version` must equal the pin before publishing.
 - **Fast path.** No network, no hashing: receipt present, version and target match,
   executable present. Full verification happens at install.
 - **Exit codes.** 0 ready or entry's own code; 1 for every starter failure, with one

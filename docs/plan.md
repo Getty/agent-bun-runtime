@@ -1,6 +1,7 @@
 # getty-bun: plan
 
-Status: adapted from the handoff on 2026-11-25. Nothing here is implemented yet.
+Status: adapted from the handoff on 2026-11-25. Phase 1 (the bootstrap starters in
+`bootstrap/`) is in progress; phase 2 onward is not implemented yet.
 Source: [handoff/2026-11-25-bun-runtime-handoff.md](handoff/2026-11-25-bun-runtime-handoff.md).
 Where this plan and the handoff disagree, this plan wins; the deviations are listed below
 and recorded as ADRs in [adr/](adr/).
@@ -95,8 +96,11 @@ getty-bun.ps1 <same commands>         identical behavior and exit codes
 - `GETTY_BUN_MIRROR` overrides the download base URL. The pinned checksum still decides.
 - The lock wait is bounded (default 300 s, `GETTY_BUN_LOCK_WAIT`). It must stay below the
   host hook timeout; Codex defaults to 600 s per hook.
-- Fast path: no network, no hashing; the slot's receipt and executable must match the
-  pin. A slot that does not match fails closed with a message; it is never overwritten.
+- Fast path: no network, no hashing, and Bun is not started; the slot's receipt must match
+  the pin (version and target) and its executable must be a non-empty file. A slot that
+  does not match fails closed with a message; it is never overwritten. `bun --version` is
+  compared with the pin only during install, before publish, so a binary replaced after
+  publish is not detected by the fast path.
 
 Interface details fixed at the start of phase 1, so both starters and the scenario suite
 code against one definition (the pin block format itself is defined with the render, in
@@ -144,7 +148,8 @@ GitHub for real):
 3. A waiter whose lock wait runs out fails with a clear message and no partial slot.
 4. A wrong checksum is rejected; nothing is published; staging is cleaned.
 5. An archive with an unexpected or extra member is rejected.
-6. A slot whose receipt or `bun --version` does not match fails closed.
+6. A published slot whose receipt does not match the pin fails closed and stays untouched;
+   an archive whose `bun --version` differs from the pin is rejected at install.
 7. A wrong `bun` on `PATH` is ignored.
 8. `run`: stdin reaches the entry byte for byte including end of input, stdout comes back
    byte for byte (UTF-8 umlauts), the exit code propagates.

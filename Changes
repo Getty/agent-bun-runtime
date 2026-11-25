@@ -3,7 +3,11 @@ Revision history for getty-bun
 {{$NEXT}}
   - POSIX starter bootstrap/getty-bun.sh with run, ensure and status:
     installs the pinned Bun on demand under a lock, then runs the given
-    command on it.
+    command on it. An empty installed executable counts as a broken
+    install and is replaced; curl and wget ignore the user's rc files.
+  - Windows starter bootstrap/getty-bun.ps1 for Windows PowerShell 5.1 and
+    PowerShell 7, with the same commands and exit codes as the POSIX
+    starter.
   - Version table (bootstrap/versions.json) pins Bun 1.4.5 with SHA256
     checksums for five targets; render-pin.ts writes the pin block into
     the starters.

@@ -381,7 +381,8 @@ export function starterCmd(root: string, args: string[], kind: StarterKind = STA
 
 export interface StarterOptions {
   stdin?: Uint8Array | string;
-  env?: Record<string, string>;
+  /** extra environment; a null value removes the variable */
+  env?: Record<string, string | null>;
   timeoutMs?: number;
   kind?: StarterKind;
 }
@@ -391,8 +392,13 @@ export interface StarterOptions {
  * command except `run` (whose exit code is the entry's), when it exited with 2.
  */
 export async function starter(sb: Sandbox, args: string[], o: StarterOptions = {}): Promise<RunResult> {
+  const env: Record<string, string> = { ...sb.env };
+  for (const [k, v] of Object.entries(o.env ?? {})) {
+    if (v === null) delete env[k];
+    else env[k] = v;
+  }
   const r = await run(starterCmd(sb.root, args, o.kind), {
-    env: { ...sb.env, ...(o.env ?? {}) },
+    env,
     cwd: sb.cwd,
     stdin: o.stdin,
     timeoutMs: o.timeoutMs ?? 120_000,
@@ -459,7 +465,8 @@ export async function snapshot(dir: string): Promise<string[]> {
         await walk(p, r);
       } else {
         const extra = name === "receipt.json" ? ` ${await readFile(p, "utf8")}` : "";
-        out.push(`${r} ${s.size}${extra}`);
+        const mode = IS_WIN ? "" : ` ${(s.mode & 0o777).toString(8)}`;
+        out.push(`${r} ${s.size}${mode}${extra}`);
       }
     }
   }
@@ -483,9 +490,11 @@ export function lines(s: string): string[] {
 
 /** The failure contract of a starter: one stderr line `getty-bun: ...`, exit 1. */
 export function failureLine(r: RunResult): string {
-  const l = lines(r.err).filter((x) => x.startsWith("getty-bun: "));
-  if (l.length === 0) throw new Error(`no "getty-bun: " line on stderr: ${JSON.stringify(r.err)}`);
-  return l.join("\n");
+  const l = lines(r.err);
+  if (l.length !== 1 || !l[0]!.startsWith("getty-bun: ")) {
+    throw new Error(`stderr must be exactly one "getty-bun: " line, got: ${JSON.stringify(r.err)}`);
+  }
+  return l[0]!;
 }
 
 /** Start the real fixture install so a test can begin from `ready`. */

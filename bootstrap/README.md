@@ -294,7 +294,8 @@ key per line, the keys in this order, a final newline. Example (linux-x64-baseli
 | `verifiedAt` | UTC time of the verification, `YYYY-MM-DDTHH:MM:SSZ` |
 
 **Fast path.** `ready` means: `receipt.json` is a readable regular file, the executable
-is a regular file (executable on POSIX), and the receipt's first three lines are exactly
+is a non-empty regular file (executable on POSIX), and the receipt's first three lines
+are exactly
 
 ```
 {
@@ -307,6 +308,20 @@ lines, parses no JSON, hashes nothing and never starts Bun. No slot at all is `m
 anything else (other values, another layout, a missing executable) is `mismatch`, which
 fails closed with the slot path and leaves the slot untouched. Other readers parse the
 receipt as JSON and ignore keys they do not know; a new key goes after `archiveSha256`.
+
+**Limit: a damaged executable.** The fast path does not look inside the executable. A
+`bin/bun` that is non-empty but cannot run (overwritten with zeros or other bytes,
+truncated, another architecture) passes as `ready`, and `run` then ends with whatever
+the kernel and the shell make of it, not a `getty-bun: ` line. For a file the kernel
+refuses to execute, `dash` exits 126 ("Exec format error"), while `busybox sh` runs the
+file as a shell script and exits with what that gives: 0 for zeros, 2 for a syntax
+error, 127 for an unknown command (executed with `dash` 0.5.12 and BusyBox 1.37.0). An
+empty `bin/bun`, which both shells would "run" with exit 0, is a `mismatch`. Checking the ELF header with shell builtins is not sound:
+`read` stops only at a newline and reads one byte per system call, and the first newline
+in the 1.4.5 binaries is at byte 4240 (x64) and 2416 (aarch64), which costs about 10 ms
+per hook (`dash` 13 ms, `busybox` 10 ms, measured on linux-x64-baseline); a damaged file
+without newlines takes minutes (a 10 MB zero file: 25 s under `dash`). Repair: remove
+the slot directory; the next call installs it again.
 
 ## Install lock and `.installing`
 
@@ -332,6 +347,30 @@ grants or proves ownership and no starter deletes a lock because of it.
 
 `pid` and `processName` are the starter's own. `processStartToken` and `environmentId`
 are `null` when the OS does not provide them; the values above are the POSIX starter's
-(from `/proc`), and the Windows starter defines its own for these two fields. A holder
-killed outright can leave `.installing` behind; the next holder overwrites it. The lock
+(from `/proc`), and the Windows starter defines its own for these two fields. The lock
 is released before Bun starts, so an entry never inherits it.
+
+A holder stopped by a signal it can handle (HUP, INT, TERM) removes `.installing` and its
+staging directory. One killed outright (SIGKILL, power loss) leaves both behind: the next
+holder overwrites `.installing`, and nothing removes the stale
+`runtimes/bun/.staging/<id>/` in the MVP (no garbage collection). A staging directory is
+safe to delete while no install runs; a published slot never refers to it.
+
+## POSIX starter: tools
+
+`getty-bun.sh` runs under any POSIX `sh` (tested with `dash` and `busybox sh`). The fast
+path uses only shell builtins and `uname`. An install also needs, on `PATH`:
+
+| Tool | Requirement |
+|---|---|
+| `flock` | util-linux `flock`: the starter uses `-w` (bounded wait) and `-E` (timeout exit code) |
+| `unzip` | Info-ZIP `unzip`: the starter lists members with `-Z1`, which BusyBox `unzip` lacks |
+| `curl`, or else `wget` | `curl` with `-q` (no `~/.curlrc`); GNU Wget 1.16 or later with `--no-config` (no wgetrc); BusyBox `wget` has no `--no-config` |
+| `sha256sum`, or else `shasum` | coreutils `sha256sum`, or Perl's `shasum -a 256` |
+| `mktemp`, `mkdir`, `mv`, `rm`, `chmod`, `date`, `id`, `tr` | coreutils (tested); `mktemp` needs `-d` with a template |
+
+Neither fetcher reads its configuration files, so a `~/.curlrc` or `~/.wgetrc` cannot
+change the download; a proxy comes from the usual environment variables (`https_proxy`,
+`no_proxy`). A missing tool fails before anything is written, with one `getty-bun: `
+line naming it; a tool of the wrong kind fails at the step that uses it, also with one
+line.

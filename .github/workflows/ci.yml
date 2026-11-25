@@ -2,6 +2,7 @@ name: ci
 
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -74,12 +75,18 @@ jobs:
         run: |
           shellcheck --version
           shellcheck bootstrap/getty-bun.sh
-      - name: getty-bun.ps1 is pure ASCII
+      - name: Starters are pure ASCII
         run: |
-          if LC_ALL=C grep -nP '[^\x00-\x7F]' bootstrap/getty-bun.ps1; then
-            echo "bootstrap/getty-bun.ps1 contains non-ASCII bytes (Windows PowerShell 5.1 reads it in the ANSI code page)" >&2
-            exit 1
-          fi
+          # Windows PowerShell 5.1 reads a file without BOM in the ANSI code page; the sh
+          # starter is held to the same rule.
+          status=0
+          for f in bootstrap/getty-bun.ps1 bootstrap/getty-bun.sh; do
+            if LC_ALL=C grep -nP '[^\x00-\x7F]' "$f"; then
+              echo "$f contains non-ASCII bytes" >&2
+              status=1
+            fi
+          done
+          exit "$status"
       - name: Pin blocks match a fresh render
         run: bun bootstrap/render-pin.ts --table bootstrap/versions.json --version "$PIN_VERSION" --check bootstrap/getty-bun.sh bootstrap/getty-bun.ps1
         env:
@@ -109,6 +116,10 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ env.HARNESS_BUN_VERSION }}
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .dev/fixtures
+          key: fixtures-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bootstrap/versions.json') }}
       - name: Fetch fixtures
         shell: bash
         run: bun bootstrap/test/fetch-fixtures.ts

@@ -6,9 +6,10 @@
 //   GETTY_BUN_TEST_REAL=1 bun test ...       also the one test against the real release
 
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
-import { readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { inflateRawSync } from "node:zlib";
 import { archiveInfo, loadRealTable } from "./lib/table";
 import { fileEntry, readZip, writeZip } from "./lib/zip";
 import {
@@ -39,6 +40,7 @@ import {
   tryLock,
   status,
   tableForArchives,
+  sha256Hex,
   exists,
   fixtureArchive,
   track,
@@ -118,7 +120,7 @@ describe(`scenario 2: parallel ensure [${STARTER}]`, () => {
     const sb = await sandbox({ mirror: server.url });
     const results = await Promise.all([1, 2, 3, 4].map(() => starter(sb, ["ensure"])));
     for (const r of results) {
-      expect(r.err === "" || !r.err.includes("getty-bun: error")).toBe(true);
+      expect(r.err).toBe(""); // a successful ensure is silent, waiters included
       expect(r.code).toBe(0);
       expect(r.out).toBe("");
     }
@@ -187,7 +189,9 @@ describe(`scenario 3: a waiter whose lock wait runs out [${STARTER}]`, () => {
     const r = await starter(sb, ["ensure"], { env: { GETTY_BUN_LOCK_WAIT: "2" }, timeoutMs: 60_000 });
     expect(r.code).toBe(1);
     expect(r.out).toBe("");
-    expect(failureLine(r)).toContain("getty-bun: ");
+    const msg = failureLine(r);
+    expect(msg).toMatch(/time(d)? ?out/i);
+    expect(msg).toContain(lockFile(sb, REAL_VERSION, st.target)); // names the lock it waited for
     expect(r.ms).toBeGreaterThan(1500); // it did wait for the lock
     expect(r.ms).toBeLessThan(40_000); // and gave up
     expect(await exists(st.slot)).toBe(false);
@@ -612,6 +616,184 @@ describe(`starter contract: environment and errors [${STARTER}]`, () => {
     expect(server.archives()).toBeGreaterThanOrEqual(1);
     expect(await exists(st.slot)).toBe(false);
     expect(await stagingLeft(sb)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+describe(`interface details (docs/plan.md, bootstrap/README.md) [${STARTER}]`, () => {
+  test("status, ensure and run exit 1 on an unsupported target, naming it; nothing is created", async () => {
+    const server = await realServer();
+    const sb = await sandbox({ mirror: server.url });
+    let env: Record<string, string | null>;
+    let named: RegExp;
+    if (IS_WIN) {
+      env = { PROCESSOR_ARCHITECTURE: "ARM64", PROCESSOR_ARCHITEW6432: null };
+      named = /arm64|aarch64/i;
+    } else {
+      const dir = join(sb.tmp, "fakeuname");
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, "uname"), "#!/bin/sh\necho 'Linux armv7l'\n", { mode: 0o755 });
+      env = { PATH: `${dir}:${sb.env.PATH}` };
+      named = /armv7l/;
+    }
+    for (const args of [["status"], ["ensure"], ["run", "entries/info.ts"]]) {
+      const r = await starter(sb, args, { env });
+      expect(r.code).toBe(1);
+      expect(r.out).toBe("");
+      expect(failureLine(r)).toMatch(named);
+    }
+    expect(await listDir(sb.home)).toEqual([]);
+    expect(server.total()).toBe(0);
+  });
+
+  const badWaits = IS_WIN ? ["abc", "-1"] : ["abc", "-1", ""]; // Windows cannot hold an empty variable
+  for (const v of badWaits) {
+    test(`GETTY_BUN_LOCK_WAIT=${JSON.stringify(v)} fails with exit 1 naming the variable`, async () => {
+      const server = await realServer();
+      const sb = await sandbox({ mirror: server.url });
+      const r = await starter(sb, ["ensure"], { env: { GETTY_BUN_LOCK_WAIT: v } });
+      expect(r.code).toBe(1);
+      expect(r.out).toBe("");
+      expect(failureLine(r)).toContain("GETTY_BUN_LOCK_WAIT");
+      expect(server.total()).toBe(0);
+      expect(await listDir(sb.home)).toEqual([]);
+    });
+  }
+
+  if (!IS_WIN) {
+    test("an empty GETTY_HOME fails with exit 1 naming the variable; nothing is created", async () => {
+      const server = await realServer();
+      const sb = await sandbox({ mirror: server.url });
+      for (const args of [["status"], ["ensure"]]) {
+        const r = await starter(sb, args, { env: { GETTY_HOME: "" } });
+        expect(r.code).toBe(1);
+        expect(r.out).toBe("");
+        expect(failureLine(r)).toContain("GETTY_HOME");
+      }
+      expect(await listDir(sb.userHome)).toEqual([]); // no ~/.getty fallback
+      expect(await listDir(sb.cwd)).toEqual([]);
+      expect(server.total()).toBe(0);
+    });
+  }
+
+  const breakers: Array<[string, (bun: string) => Promise<void>]> = [["is missing", (bun) => rm(bun)]];
+  if (!IS_WIN) breakers.push(["is not executable", (bun) => chmod(bun, 0o644)]);
+  for (const [what, breakIt] of breakers) {
+    test(`a slot whose bin/bun ${what} is mismatch: ensure and run exit 1 naming the slot, slot untouched`, async () => {
+      const server = await realServer();
+      const sb = await sandbox({ mirror: server.url });
+      const st = await install(sb);
+      await breakIt(slotBun(st.slot));
+      const before = await snapshot(join(sb.home, "runtimes"));
+      const requests = server.total();
+
+      const s = await starter(sb, ["status"]);
+      expect(s.code).toBe(0);
+      expect(JSON.parse(s.out).state).toBe("mismatch");
+      for (const args of [["ensure"], ["run", "entries/info.ts"]]) {
+        const r = await starter(sb, args);
+        expect(r.code).toBe(1);
+        expect(r.out).toBe("");
+        expect(failureLine(r)).toContain(st.slot);
+      }
+      expect(await snapshot(join(sb.home, "runtimes"))).toEqual(before);
+      expect(server.total()).toBe(requests);
+    });
+  }
+
+  test("the receipt after an install has the canonical bytes of bootstrap/README.md", async () => {
+    const server = await realServer();
+    const sb = await sandbox({ mirror: server.url });
+    const t0 = Date.now();
+    const st = await install(sb);
+    const raw = new Uint8Array(await Bun.file(join(st.slot, "receipt.json")).arrayBuffer());
+    expect(raw.every((b) => b < 0x80)).toBe(true); // ASCII
+    const text = new TextDecoder().decode(raw);
+    expect(text.includes("\r")).toBe(false); // LF only
+    expect(text.endsWith("}\n")).toBe(true); // final newline
+    const info = archiveInfo(realTable, REAL_VERSION, st.target);
+    const entry = readZip(await fixtureArchive(st.target)).find((e) => e.name === info.member)!;
+    const binary = entry.method === 8 ? inflateRawSync(entry.raw) : entry.raw;
+    const l = text.split("\n");
+    expect(l.slice(0, 9)).toEqual([
+      "{",
+      `  "version": "${REAL_VERSION}",`,
+      `  "target": "${st.target}",`,
+      `  "archiveSha256": "${info.sha256}",`,
+      `  "contractVersion": 1,`,
+      `  "archive": "${info.archive}",`,
+      `  "member": "${info.member}",`,
+      `  "binarySha256": "${sha256Hex(binary)}",`,
+      `  "executable": "${IS_WIN ? "bin/bun.exe" : "bin/bun"}",`,
+    ]);
+    const at = l[9]!.match(/^ {2}"verifiedAt": "(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)"$/);
+    expect(at).not.toBeNull();
+    const when = Date.parse(at![1]!);
+    expect(when).toBeGreaterThan(t0 - 60_000);
+    expect(when).toBeLessThan(Date.now() + 60_000);
+    expect(l.slice(10)).toEqual(["}", ""]);
+  });
+
+  test("while an install runs, .installing holds the record of README.md; a timed-out waiter names it; it is gone afterwards", async () => {
+    const server = await realServer(6000); // a slow download keeps the holder in its critical section
+    const sb = await sandbox({ mirror: server.url });
+    const st = await status(sb);
+    const installing = join(dirname(lockFile(sb, REAL_VERSION, st.target)), ".installing");
+    const holder = Bun.spawn({
+      cmd: starterCmd(sb.root, ["ensure"]),
+      env: sb.env,
+      cwd: sb.cwd,
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    track(() => void holder.kill()); // only the process this test started
+    const holderErr = new Response(holder.stderr).text();
+    const deadline = Date.now() + 60_000;
+    while (!(await exists(installing)) && Date.now() < deadline) await Bun.sleep(100);
+    expect(await exists(installing)).toBe(true);
+    const rec = JSON.parse(await readFile(installing, "utf8"));
+
+    const waiter = await starter(sb, ["ensure"], { env: { GETTY_BUN_LOCK_WAIT: "1" } });
+    expect(waiter.code).toBe(1);
+    expect(failureLine(waiter)).toContain(installing);
+
+    expect(Object.keys(rec)).toEqual([
+      "schemaVersion",
+      "pid",
+      "processName",
+      "processStartToken",
+      "installId",
+      "environmentId",
+      "requestedVersion",
+      "target",
+    ]);
+    expect(rec.schemaVersion).toBe(1);
+    expect(rec.pid).toBe(holder.pid); // the starter's own pid
+    expect(typeof rec.processName).toBe("string");
+    expect(rec.processName).not.toBe("");
+    expect(rec.processStartToken === null || typeof rec.processStartToken === "string").toBe(true);
+    expect(rec.environmentId === null || typeof rec.environmentId === "string").toBe(true);
+    expect(typeof rec.installId).toBe("string");
+    expect(rec.installId).not.toBe("");
+    expect(rec.requestedVersion).toBe(REAL_VERSION);
+    expect(rec.target).toBe(st.target);
+
+    expect(await holder.exited).toBe(0);
+    expect(await holderErr).toBe("");
+    expect(await exists(installing)).toBe(false); // removed before the lock is released
+    expect(await exists(lockFile(sb, REAL_VERSION, st.target))).toBe(true); // the lock file stays
+    expect((await status(sb)).state).toBe("ready");
+  });
+
+  test("arguments after the entry arrive unchanged through a fresh install too", async () => {
+    const server = await realServer();
+    const sb = await sandbox({ mirror: server.url });
+    const args = ["plain", "with space", 'say "hi"', "trailing\\", "\u00e4\u00df\u65e5"];
+    const r = await starter(sb, ["run", "entries/info.ts", ...args]); // installs, then runs
+    expect(r.code).toBe(0);
+    expect(server.archives()).toBe(1);
+    expect(JSON.parse(r.out).argv).toEqual(args);
   });
 });
 
