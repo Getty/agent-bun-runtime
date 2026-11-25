@@ -1,6 +1,6 @@
 # 0005: Bun pin and version table
 
-Status: accepted, 2026-11-25; the pin is confirmed after phase 1.
+Status: accepted, 2026-11-25; pin 1.4.5 confirmed by the owner, 2026-11-25.
 
 ## Context
 

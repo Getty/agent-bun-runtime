@@ -1,6 +1,7 @@
 # 0002: The starter installs on demand; the SDK never installs
 
-Status: accepted, 2026-11-25 (owner: install on plugin install or update, waiting system).
+Status: accepted, 2026-11-25 (owner: install on plugin install or update, waiting system);
+partly superseded by [0007](0007-starter-rules-after-phase-1.md).
 
 ## Context
 

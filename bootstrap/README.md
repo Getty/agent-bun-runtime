@@ -52,8 +52,7 @@ below are behavior.
   CI 45589361806, scenario jobs linux-x64 139119150180 and linux-arm64 139119150223; the
   wget path: not checked, the suite never runs it. file with `getty-bun.ps1`: executed,
   CI 45589361806, scenario jobs Windows PowerShell 5.1 139119150551 and PowerShell 7
-  139119150607, and in the Windows worker's local unit tests on PowerShell 7.7.0 on
-  Linux, outside the suite.)
+  139119150607, and a local run with pwsh 7 on Linux, not in CI.)
 - `sha256`: the archive's SHA256, 64 lowercase hex digits, copied from the signature-
   verified `SHASUMS256.txt` (below). The starter checks it before unpacking; it never
   reads a checksum from a file next to the archive.
@@ -401,13 +400,15 @@ static CI job. LF only: executed, CI 45572032454, where 5.1 parsed and ran the L
 checkout (`.gitattributes` `eol=lf`) in the parse step and the scenario jobs on that
 image. The 5.1 code page, a UNC `GETTY_HOME` and the unset default: not checked.)
 
-**Evidence.** The labels in this section say what ran a claim. *Executed, CI
+**Evidence.** The labels in this section say what backs a claim. *Executed, CI
 45572032454*: the shared scenario suite in CI run 45572032454 (commit `d822139`) on
 GitHub's `windows-2025-vs2026` image 20261116.315.1, under Windows PowerShell
 5.1.26100.33822 and PowerShell 7.6.10, with Git for Windows' bash 5.3.15 and Defender
-real-time protection off. *Executed, pwsh 7 on Linux*: the Windows worker's local unit
-tests (not in the repository) on PowerShell 7.7.0 on Linux, neither Windows nor 5.1.
-*Not checked*: nothing has run it.
+real-time protection off. *Source-checked (`getty-bun.ps1:<lines>`)*: read in the
+starter at those lines. *A local run with pwsh 7 on Linux, not in CI* adds to a source
+check: the Windows worker's local unit tests on PowerShell 7.7.0 on Linux, which are not
+in the repository and ran neither on Windows nor under 5.1; such a run is no label of
+its own. *Not checked*: nothing has run it.
 
 **Targets.** `windows-x64` when `IsProcessorFeaturePresent` reports AVX2, otherwise
 `windows-x64-baseline`; the check compiles through `Add-Type`, and where that cannot
@@ -418,9 +419,10 @@ lock. ARM64 fails as an unsupported target. (The `Add-Type` check and the ARM64 
 simulated through `PROCESSOR_ARCHITECTURE`: executed, CI 45572032454; there the check
 chose `windows-x64`, logged as `target windows-x64` by both per-hook cost jobs after a
 fresh `ensure` (jobs 139060757366 and 139060757556). The illegal-instruction fallback:
-executed, pwsh 7 on Linux, with a fixture probe that exits with that code. A real CPU
-without AVX2, and Constrained Language Mode, which also restricts the .NET calls the
-rest of the starter makes: not checked.)
+source-checked (`getty-bun.ps1:583-600`), a local run with pwsh 7 on Linux and a
+fixture probe that exits with that code, not in CI. A real CPU without AVX2, and
+Constrained Language Mode, which also restricts the .NET calls the rest of the starter
+makes: not checked.)
 
 **Fast path.** The starter takes the first slot that exists of `windows-x64`, then
 `windows-x64-baseline`, without detecting the CPU: `ready` runs it, `mismatch` fails
@@ -430,7 +432,8 @@ slot, or, with neither present, the detected target's. The fast path uses no `Ad
 and no cmdlet from a module that 5.1 would have to load (`[type]::new()`, never
 `New-Object`); the per-hook CI job measures what that costs. (`ready`, `mismatch` for a
 tampered receipt or a missing or empty `bun.exe`, and `missing`: executed, CI
-45572032454. The slot order and the own-functions-only rule: executed, pwsh 7 on Linux.)
+45572032454. The slot order and the own-functions-only rule: source-checked
+(`getty-bun.ps1:179-214`, `:687-737`), a local run with pwsh 7 on Linux, not in CI.)
 
 **Limit: a CPU that loses AVX2.** The fast path does not detect the CPU, so a slot
 installed as `windows-x64` stays the first existing slot when the same profile later
@@ -450,8 +453,9 @@ Windows Error Reporting dialog while the lock is held; the previous mode is rest
 before the entry starts. A failed probe is retried once after about 1 s (antivirus may
 hold a fresh `bun.exe`), a timed-out one is not; the rename into the slot is retried for
 about 10 s on sharing violations. (The download window against a stalling and a
-trickling local server, the probe kill and the timed-out probe without retry: executed,
-pwsh 7 on Linux. The error-mode calls run, best effort, in every install of CI
+trickling local server, the probe kill and the timed-out probe without retry:
+source-checked (`getty-bun.ps1:313-349`, `:430-433`, `:448`), a local run with pwsh 7
+on Linux, not in CI. The error-mode calls run, best effort, in every install of CI
 45572032454; that they took effect and keep a crash dialog away, the probe retry and the
 rename retry: not checked.)
 
@@ -478,9 +482,10 @@ stdin failed there in the test entry's own zero-length `Bun.write` to the stdout
 **Limit: entry arguments.** `-File` hands the arguments after the script path to
 PowerShell's own parameter binding: an entry argument shaped like `-name:value` or
 starting with `-` may be re-parsed by PowerShell (PowerShell 7 splits `-x:foo` into
-`-x` and `foo`: executed, pwsh 7 on Linux; 5.1: not checked). Entry arguments must not
-start with `-`. (Arguments with spaces, quotes, a trailing backslash and non-ASCII
-text: executed, CI 45572032454.)
+`-x` and `foo`: source-checked (`getty-bun.ps1:741`, the arguments come from `$args`,
+without a `param` block), a local run with pwsh 7 on Linux, not in CI; 5.1: not
+checked). Entry arguments must not start with `-`. (Arguments with spaces, quotes, a
+trailing backslash and non-ASCII text: executed, CI 45572032454.)
 
 **Limit: no console of its own.** Bun starts with `CreateNoWindow`, so no console
 window opens for a hook. The trade-off: Ctrl+C in the host's console does not reach

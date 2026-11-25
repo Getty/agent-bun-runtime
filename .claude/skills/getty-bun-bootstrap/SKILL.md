@@ -28,23 +28,43 @@ exist: `getty-bun.sh` needs POSIX `sh`, `curl` or `wget`, `unzip`, `sha256sum` (
 - **Lock.** One process holds the OS lock across download, verify and publish (`flock`
   on Linux; `FileShare.None` on Windows). Waiters block, bounded by
   `GETTY_BUN_LOCK_WAIT` (default 300 s), then re-check the slot. `.installing` is
-  diagnostics, not ownership. Never delete a lock because a PID looks dead.
+  diagnostics, not ownership. Never delete a lock because a PID looks dead. Close the
+  lock descriptor (Windows: dispose the stream) before Bun starts for the entry, so an
+  entry never holds the lock (scenario 2b). `getty-bun.sh` has fd 9 open only in the
+  install's command group, which ends before the exec of Bun; inside it the download,
+  `unzip` and the staging `bun --version` probe run with `9>&-`. `getty-bun.ps1` disposes
+  the stream right after publish, before Bun starts again. In both, only the staging
+  probe runs Bun while the lock is held.
 - **Integrity.** SHA256 from the pin block, never from a file next to the archive.
   Verify before unpacking; the archive must hold exactly the expected member plus the
   directory entries of its parents (Bun's archives carry `bun-<target>/`), extracted by
   name; `bun --version` must equal the pin before publishing.
-- **Fast path.** No network, no hashing: receipt present, version and target match,
-  executable present. Full verification happens at install.
-- **Exit codes.** 0 ready or entry's own code; 1 for every starter failure, with one
-  stderr line saying what failed and where. Never 2.
+- **Fast path.** No network, no hashing, no Bun start: receipt present, version and
+  target match, executable a non-empty file. Full verification, `bun --version`
+  included, happens at install. On Windows x64 the fast path does not detect the CPU
+  (below).
+- **Exit codes.** 0 when ready; 1 for every starter failure, with one `getty-bun: `
+  stderr line saying what failed and where. Never 2 for the starter's own failures;
+  `run` passes the entry's code through unchanged, 2 included. On Windows that code is
+  0-255: Bun 1.4.5 itself exits with the low byte.
 - **Same behavior.** Both starters pass the same scenario suite with the same exit
-  codes and the same `status` JSON keys. A difference is a bug in one of them.
+  codes and the same `status` JSON keys. A difference is a bug in one of them; open:
+  the second `bun --version` probe after publish, only in `getty-bun.ps1` (`k19`).
 
 ## Target detection
 
-Linux: `uname -m` (`x86_64` -> `x64`, `aarch64`/`arm64` -> `aarch64`); `x64` without the
-`avx2` flag in `/proc/cpuinfo` -> `x64-baseline`; unreadable -> baseline. musl is not an
-MVP target: detect it and fail with a message. Under Git Bash, MSYS or Cygwin
+Linux, on every call: `uname -m` (`x86_64` -> `x64`, `aarch64`/`arm64` -> `aarch64`);
+`x64` without the `avx2` flag in `/proc/cpuinfo` -> `x64-baseline`; unreadable ->
+baseline. musl is not an MVP target: detect it and fail with a message.
+
+Windows (skill `getty-bun-windows`): only `AMD64` is supported. The fast path takes the
+first slot that exists of `windows-x64`, then `windows-x64-baseline`; a mismatching one
+fails closed, never skipped. Only with neither present does the starter detect AVX2
+(`Add-Type`; no answer -> baseline), for an install or `status`. An x64 probe that dies
+with an illegal instruction publishes nothing; the baseline then installs under its own
+lock. Details: [bootstrap/README.md](../../../bootstrap/README.md), "Windows starter".
+
+Under Git Bash, MSYS or Cygwin
 (`uname -s` `MINGW*`, `MSYS*`, `CYGWIN*` or any `*_NT-*`, which covers MSYS2's UCRT64
 and CLANG64) the `sh` starter forwards to the PowerShell one and does nothing itself.
 

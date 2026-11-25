@@ -1,7 +1,8 @@
 # getty-bun: plan
 
 Status: adapted from the handoff on 2026-11-25. Phase 1 (the bootstrap starters in
-`bootstrap/`) is in progress; phase 2 onward is not implemented yet.
+`bootstrap/`) is complete: merged into `main` at `262bc95` (PR 1), gate green in CI run
+45603412444. Phase 2 onward is not implemented yet.
 Source: [handoff/2026-11-25-bun-runtime-handoff.md](handoff/2026-11-25-bun-runtime-handoff.md).
 Where this plan and the handoff disagree, this plan wins; the deviations are listed below
 and recorded as ADRs in [adr/](adr/).
@@ -35,7 +36,8 @@ asks for it.
 
 ## Deviations from the handoff
 
-1. **The starter installs, on demand** ([ADR 0002](adr/0002-install-on-demand.md)).
+1. **The starter installs, on demand** ([ADR 0002](adr/0002-install-on-demand.md); exit
+   codes and hook timeout: [ADR 0007](adr/0007-starter-rules-after-phase-1.md)).
    Every starter call ensures the pinned Bun before it runs the entry: missing means
    install under the OS lock, present means a fast local check. After a plugin install or
    update the first hook (normally `SessionStart`) installs; concurrent hooks wait,
@@ -90,17 +92,47 @@ getty-bun.ps1 <same commands>         identical behavior and exit codes
 - The consumer root comes from the starter's own path, never from the working directory.
 - `<entry>` is relative to the consumer root.
 - stdout belongs to the entry (hook JSON); starter messages go to stderr.
-- The starter never exits with 2, which some hosts read as a block.
+- The starter never exits with 2 for its own failures (some hosts read 2 as a block); the
+  entry's exit code passes through unchanged, 2 included.
+- On Windows an entry's exit code is 0 to 255: Bun 1.4.5 itself exits with the low byte
+  of the entry's code, and the starters pass on what Bun exits with (executed, CI
+  45589361806; `bootstrap/README.md`, "Limit: exit codes through Git Bash").
+- Entry arguments must not begin with `-`: on Windows `-File` hands every argument after
+  the script path to PowerShell's own parameter binding, which may re-parse it
+  (`bootstrap/README.md`, "Limit: entry arguments").
+- The install lock is released before Bun starts, so an entry never holds it (scenario
+  2b in `bootstrap/test/scenarios.test.ts`, executed on all four scenario legs, CI
+  45603412444).
 - `GETTY_HOME` (absolute) overrides the root `~/.getty` or `%USERPROFILE%\.getty`; tests
-  always set it.
+  always set it. It is one override for a whole environment, not a per-consumer setting:
+  two consumers seeing different `GETTY_HOME` values get separate stores and locks, safe
+  but not shared.
 - `GETTY_BUN_MIRROR` overrides the download base URL. The pinned checksum still decides.
 - The lock wait is bounded (default 300 s, `GETTY_BUN_LOCK_WAIT`). It must stay below the
-  host hook timeout; Codex defaults to 600 s per hook.
+  host hook timeout (Codex and Claude Code document 600 s for most command hooks), and
+  consumers set the hook timeout above the lock wait plus one download: a waiter that gets
+  the lock after a crashed holder downloads itself.
 - Fast path: no network, no hashing, and Bun is not started; the slot's receipt must match
   the pin (version and target) and its executable must be a non-empty file. A slot that
   does not match fails closed with a message; it is never overwritten. `bun --version` is
   compared with the pin only during install, before publish, so a binary replaced after
   publish is not detected by the fast path.
+- Open difference from "identical behavior" (card `k19`): `getty-bun.ps1` probes the
+  published `bun.exe` a second time after it has released the lock, and fails with exit 1
+  if that probe does not pass, leaving the slot as published; the next call takes the
+  fast path (source-checked, `bootstrap/getty-bun.ps1:566-572`). `getty-bun.sh` and
+  `bootstrap/README.md` have no such second probe.
+- Target on the fast path: `getty-bun.sh` detects it on every call (`uname`,
+  `/proc/cpuinfo`). `getty-bun.ps1` on x64 does not detect the CPU: it takes the first
+  slot that exists of `windows-x64`, then `windows-x64-baseline`; `ready` runs it,
+  `mismatch` fails closed (a mismatching `windows-x64` slot is never skipped for a ready
+  baseline one). Only when neither exists does it detect AVX2 (`IsProcessorFeaturePresent`
+  through `Add-Type`) and install; an x64 Bun whose install probe dies with an illegal
+  instruction publishes nothing, and the starter installs `windows-x64-baseline` instead.
+  With neither slot present, `status` reports `missing` and the detected target:
+  `windows-x64` when AVX2 is reported, else `windows-x64-baseline`, also when the check
+  cannot load (Constrained Language Mode, no compiler). Details: `bootstrap/README.md`,
+  "Windows starter".
 
 Interface details fixed at the start of phase 1, so both starters and the scenario suite
 code against one definition (the pin block format itself is defined with the render, in
@@ -157,25 +189,83 @@ GitHub for real):
 10. Offline after install: `run` works without network.
 11. Windows only: Git Bash forwarding uses the same slot and lock as PowerShell.
 
+### Host checks in phases 3a and 3b
+
+Phase 3a measures on real Codex, besides its gate (Windows as a card on the
+windows-developer board). The facts below are source-checked in openai/codex `3f65e9f`
+(hub `agent-developer`, `docs/windows-referenzen.md`, question 2), not executed:
+
+- **Hook shell.** Codex runs `command` in the session shell of the turn environment with
+  `-c`, not as a login shell: `derive_exec_args("", use_login_shell = false)`
+  (`codex-rs/core/src/session/mod.rs:6477-6483`; zsh, bash and sh get `-c`,
+  `codex-rs/core/src/shell.rs:24-31`). Only without a known session shell, when there is
+  no single local turn environment
+  (`codex-rs/core/src/environment_selection.rs:1537-1548`), does it fall back to `$SHELL`
+  or `/bin/sh` with `-lc` (`codex-rs/hooks/src/engine/command_runner.rs:456-466`).
+  Measure which shell a real session uses, whether it reads startup files (zsh reads
+  `.zshenv` even without a login), what that costs per hook, and what lands on stdout
+  ahead of the entry's hook JSON.
+- **stdin.** Codex writes the hook object with `write_all` (`command_runner.rs:318-326`);
+  whether it then closes stdin is not traced. claude-mem (`4dc8e48`, source-checked) reads
+  one complete JSON object because "Codex can keep stdin open". The starter ends once the
+  entry has ended either way (scenario 8b in `bootstrap/test/scenarios.test.ts`, executed
+  on all four scenario legs, CI 45603412444). An entry that reads stdin to its end would
+  wait (derived); the measurement decides whether the SDK may.
+- **`commandWindows` shell.** Codex runs `commandWindows` in the session shell, by
+  default PowerShell (`pwsh`, else `powershell.exe`) as `-NoProfile -Command <line>`,
+  otherwise `cmd /C`; there is no exec form. Measure which shell a real desktop uses and
+  the per-hook cost of the two PowerShell starts (on the CI runner about 0.5–0.79 s,
+  [hook-cost.md](hook-cost.md), "Codex nesting").
+
+Phase 3b: until "Claude Code on Windows" is decided, a plugin for Codex and Claude Code
+needs separate hook files. Both hosts read `hooks/hooks.json` by default (documented;
+skills `codex-plugin-engineering`, `claude-code-plugin-engineering`). Claude Code merges a
+`hooks` path in its manifest with that default file instead of replacing it (documented;
+`claude-code-plugin-engineering`, `references/manifest-layout.md`), so it always reads
+`hooks/hooks.json`; and Claude Code, which has no `commandWindows`, would run the `sh`
+line on Windows, which fails without Git Bash (not measured for this line). The
+separation must therefore come from the Codex side: `hooks/hooks.json` holds the Claude
+Code hooks, and the Codex hooks live in another file. Whether the Codex manifest can point
+to another hook file is open.
+
 ## Open decisions (owner)
 
 - **Claude Code on Windows (before phase 3b).** Claude Code's `hooks.json` has no
-  per-OS field, and without Git Bash only two entries start on Windows (measured by
-  windows-developer, `docs/hook-start-windows.md`, Claude Code 2.1.287): the exec form
-  on an extensionless path with a `.exe` next to it, or a dot-sourced `.cmd` polyglot in
-  shell form, which pays a PowerShell start (~720 ms) per hook. Options: a tiny native
-  shim (like winlaunch, built reproducibly with zig, x64 only) that runs the bound Bun
-  directly and calls `getty-bun.ps1` only to install, or the polyglot. Decide with the
-  per-hook cost measured in phase 1 ([hook-cost.md](hook-cost.md): on the CI runner the
-  starter adds about 0.35–0.52 s over Bun; under Codex' PowerShell nesting a hook takes
-  about 0.5–0.79 s in total; real desktops are slower).
+  per-OS field (documented: none among the command hook fields, none in the CHANGELOG),
+  so one entry must start on Linux and on Windows alike. Since Claude Code 2.1.139 a hook
+  with `args` runs in exec form, spawned without a shell (source-checked,
+  `anthropics/claude-code` `4cc5e8b`, `CHANGELOG.md`); without `args` it runs in shell
+  form, on Windows in Git Bash, or in PowerShell when Git Bash is not installed
+  (documented). Measured by windows-developer (`docs/hook-start-windows.md`, Claude Code
+  2.1.287), where Git Bash could not be hidden, so the PowerShell fallback was measured
+  with `"shell": "powershell"` as a stand-in; Windows without Git for Windows is not
+  measured:
+  - Windows-only entries start, such as the exec form `powershell -NoProfile
+    -ExecutionPolicy Bypass -File ...` (probe x9), but none serves Linux from the same
+    entry.
+  - Of the entries that start on Linux and on Windows from one `hooks.json`, two remain
+    without Git Bash: the exec form on an extensionless path with a `.exe` next to it
+    (probe y1), or a dot-sourced `.cmd` polyglot in shell form (probe q6 under the
+    stand-in), which pays a PowerShell start (~720 ms) per hook. Their Linux side was
+    not part of these probes.
+
+  Options: a tiny native shim (like winlaunch, built reproducibly with zig, x64 only)
+  that runs the slot's Bun directly and calls `getty-bun.ps1` only to install, or the
+  polyglot. A shim that starts Bun itself must read the pin block, detect the target
+  (AVX2) and check the fast path: a third reader of the pin block beside the two
+  starters, which today are the only things that select a version. That is part of this
+  decision. Decide with the per-hook cost measured in phase 1
+  ([hook-cost.md](hook-cost.md): on the CI runner the starter adds about 0.35–0.52 s over
+  Bun; under Codex' PowerShell nesting a hook takes about 0.5–0.79 s in total; real
+  desktops are slower).
 - **Codex re-trust on updates.** The Codex docs say a plugin update that changes a
   bundled script needs a new hook review, even when the hook definition stays the same.
   Measure in phase 3a what counts as a bundled script (the starter, the entry, both).
-- Bun pin: 1.4.5 is the candidate (latest stable, 2026-11-19); confirmed after phase 1.
 
 ## Decided
 
+- Bun pin: 1.4.5 (latest stable, 2026-11-19), confirmed by the owner on 2026-11-25
+  ([ADR 0005](adr/0005-bun-pin-and-version-table.md)).
 - Distribution of `@getty/bun-runtime`: npm, public, Artistic-2.0
   ([ADR 0006](adr/0006-npm-distribution.md)). The org `getty` exists with the user
   `getty` as owner; the name was free on 2026-11-25. First release by hand after
