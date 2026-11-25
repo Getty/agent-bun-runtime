@@ -1,0 +1,16 @@
+---
+class: standard
+created: 2026-11-25T10:41:34Z
+id: 18
+priority: low
+status: backlog
+tags:
+- bootstrap
+- test
+- windows
+title: 'Bootstrap suite: test the Git Bash forwarding on Linux with fake uname, cygpath
+  and PowerShell'
+updated: 2026-11-25T10:41:34Z
+---
+
+The forwarding rules of getty-bun.sh forward_to_powershell (GETTY_HOME conversion, failure lines, unchanged arguments, and the stdin rule: a non-tty character device gets an empty pipe, everything else exec) are checked on Linux only by a local, untracked script with a fake uname, cygpath and PowerShell under dash, bash and BusyBox sh. A regression in that branch passes Linux CI. Done: the same checks as a bun:test group in bootstrap/test that runs on Linux CI, with the README labels pointing at it. Found in the phase 1 round six review (k9).
