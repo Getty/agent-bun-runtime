@@ -1,0 +1,14 @@
+*.swp
+*~
+.DS_Store
+
+node_modules/
+/dist/
+*.tgz
+
+# Materialized karr view, not the tracked refs/karr/*
+/tasks/
+/config.yml
+
+# Claude Code worktrees (claude --worktree / isolated agents) -- never commit
+/.claude/worktrees/

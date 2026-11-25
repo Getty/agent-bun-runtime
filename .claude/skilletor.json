@@ -1,0 +1,30 @@
+{
+  "targets": [
+    "claude"
+  ],
+  "sources": {
+    "getty": {
+      "git": "https://github.com/Getty/skills"
+    },
+    "karr": {
+      "git": "https://github.com/Getty/karr"
+    }
+  },
+  "install": {
+    "bundles": [
+      "getty-house@getty"
+    ],
+    "skills": [
+      "getty-bun-integration@getty",
+      "codex-plugin-engineering@getty",
+      "claude-code-plugin-engineering@getty",
+      "hermes-plugin-engineering@getty",
+      "codex-headless@getty",
+      "claude-headless@getty",
+      "getty-git-commit-style@getty",
+      "getty-git-usage@getty",
+      "kanban-issues-karr-ticket@karr",
+      "kanban-issues-karr-coordination@karr"
+    ]
+  }
+}
