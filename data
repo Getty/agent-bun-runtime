@@ -1,0 +1,30 @@
+---
+class: standard
+completed: 2026-11-25T11:29:55Z
+created: 2026-11-25T05:22:25Z
+depends_on:
+- 8
+id: 10
+priority: high
+started: 2026-11-25T05:23:31Z
+status: done
+tags:
+- phase-1
+- ci
+title: 'Phase 1: CI workflows for the bootstrap'
+updated: 2026-11-25T11:29:55Z
+---
+
+Part of k2. Lane: getty-bun-ci-worker. .github/workflows: scenario suite on ubuntu-latest, ubuntu-24.04-arm, windows-latest under powershell (5.1) and pwsh (7); shellcheck on getty-bun.sh; one job that downloads Bun from GitHub for real; the per-hook cost on Windows measured (PowerShell start plus Bun start, fast path) and written to the job summary. Actions pinned by commit SHA.
+
+2026-11-25 05:31 First draft: .github/workflows/ci.yml with jobs scenarios (ubuntu-latest sh, ubuntu-24.04-arm sh, windows-latest powershell and pwsh), static (shellcheck, ps1 pure ASCII, render --check), real-download (ubuntu sh, windows powershell), hook-cost (ubuntu sh, windows powershell and pwsh). Actions pinned by SHA: checkout v7.0.1, cache v6.1.0, setup-bun v2.2.0. Parsed locally only; not run in CI yet.
+
+2026-11-25 06:36 First CI run 45561381664 on 174fc8f: Linux legs green (scenarios ubuntu-latest and ubuntu-24.04-arm, real download, hook cost); Windows legs red only because getty-bun.ps1 was not committed yet (setup-bun, PowerShell 5.1.26100 and pwsh 7.6.10, Git Bash and fixtures all fine); shellcheck red on SC1007 in getty-bun.sh (k7). Round two in the tree: push limited to main, ASCII check on both starters, fixture cache for real-download.
+
+2026-11-25 07:09 Run 45565500890 on a2c12da: shellcheck and static green; scenarios ubuntu-latest, ubuntu-24.04-arm green; real download linux green; hook cost all three legs green. Windows scenarios powershell and pwsh: 58 pass, 2 fail (scenario 8 empty stdin, scenario 11 forwarding stub); real download windows powershell: the real download passed, same two failures. Round three in the tree: 5.1 parse step, code pages, LanguageMode and Defender state in the versions step, hook-cost table tee-d into the job log.
+
+Commit d822139: 5.1 parse step on the powershell leg, Windows environment facts (code pages, LanguageMode, Defender), hook-cost table appended to the job log. CI run 45572032454 pending.
+
+Workflows done (matrix, shellcheck, real download, per-hook cost); green on every run since 45597390051, last 45601335472. Reviewed GO by both reviewers. Closes with the PR #1 merge.
+
+Commits (git log 65c7dee..262bc95, .github/): 174fc8f a2c12da d822139. Landed on main by fast-forward to 262bc95 (PR 1).
