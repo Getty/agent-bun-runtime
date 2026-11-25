@@ -1,0 +1,37 @@
+---
+class: standard
+completed: 2026-11-25T11:29:09Z
+created: 2026-11-25T05:22:06Z
+depends_on:
+- 6
+id: 8
+priority: high
+started: 2026-11-25T05:23:26Z
+status: done
+tags:
+- phase-1
+- bootstrap
+- tests
+title: 'Phase 1: shared bootstrap scenario suite and fixture server'
+updated: 2026-11-25T11:29:15Z
+---
+
+Part of k2. Lane: getty-bun-bootstrap-test-writer. bootstrap/test/: bun:test suite with the eleven phase 1 scenarios of docs/plan.md, parametrized over the starter under test (sh; powershell and pwsh on Windows), a local fixture server for GETTY_BUN_MIRROR (real archive cached, corrupt and extra-member archives built by the test), GETTY_HOME in a fresh temporary directory, PATH without Bun. One real-download variant, off by default, for the dedicated CI job.
+
+bootstrap/test: scenarios.test.ts (32 cases incl. 2b lock-free-while-entry-runs), render-pin.test.ts (21, adopted from k6), fetch-fixtures.ts, measure-hook.ts (direct exec form plus the Codex nesting powershell -Command -> -File), lib/. Executed on Linux x64 (no avx2) against the sh starter: 51 pass, 2 skip (scenario 11 not Windows; real download without GETTY_BUN_TEST_REAL), 0 fail. Mutations checked: checksum off -> 4 red, leaked lock fd -> 2b red, no flock -> 2 and 3 red. Not run: PowerShell starters, Windows-only helpers, arm64.
+
+2026-11-25 06:33 Committed in 174fc8f. Review findings to fix: S2 no assertion of exactly one stderr line on failure; S3 scenario 3 does not check the timeout message; S4 untested interface details (status exit 1 on unsupported target, invalid GETTY_BUN_LOCK_WAIT, empty GETTY_HOME, missing or non-executable bin/bun as mismatch, receipt canonical form, .installing record, argv after a fresh install); nits: a dead assertion, measure-hook label.
+
+Round two: S2 exactly one getty-bun stderr line per failure, silent successful ensure; S3 timeout wording and lock path; S4 interface-details block (unsupported target, invalid GETTY_BUN_LOCK_WAIT, empty GETTY_HOME, missing or non-executable bin/bun as mismatch, receipt bytes, .installing record, argv after a fresh install); measure-hook label. Executed with the sh starter: 62 pass, 2 skip, 0 fail; each new test turned red by one mutation. Windows branches not run yet.
+
+Round three: empty bin/bun mismatch test (S1); measure-hook Codex nesting row records exit, timeout and bytes as data, never throws; harness refuses a Windows spawn without GETTY_HOME (UserProfile does not follow USERPROFILE); scenario 5 asserts the rejected entry name; long-name canonical path comparison (samePath, paths.test.ts); expectExit shows stderr in failures. Executed with sh: 65 pass, 3 skip, 0 fail. CI 45565500890 Windows reds (scenario 8 empty stdin, scenario 11) are starter-side, for k9.
+
+Round 4 (uncommitted): scenario 11 broadened (exit codes 0/1/2/7/42 asserted, 256 and 3221225477 as data; POSIX GETTY_HOME; args with spaces, quote, trailing backslash, empty; empty and 256-byte binary stdin; non-ASCII root). file:// mirror test for both starters. Empty stdin split into null device, empty buffer, pipe closed at once; echo entry skips the empty write (Bun 1.4.5 Windows ftruncate EINVAL, run 45572032454, see k11); Windows diagnostic recorded as data. measure-hook: Git Bash row, completed runs count only exit 0. Local: 68 pass, 9 skip (Windows-only or GETTY_BUN_TEST_REAL), 0 fail under dash and busybox.
+
+Round 5 (uncommitted): scenario 11 [stdin] split into binary, pipe closed at once and three empty-buffer tests: usr/bin/bash.exe direct and bin/bash.exe with windowsHide asserted; bin/bash.exe with a shared console recorded as data only, to test the Git for Windows wrapper hypothesis (see k9). 20 s bound per Git Bash call; Windows timeouts kill the tree with taskkill /T /F /PID of our own child. Diagnostic rows for what fd 0 is under both bash executables. Local: 69 pass, 13 skip (Windows-only or GETTY_BUN_TEST_REAL), 0 fail under dash and busybox; no sandbox left.
+
+f12fa1d: CI 45597390051 green on all 10 jobs (Windows 88/2/0 and 89/1/0, Linux 69/19/0 and 70/18/0); the earlier failing direct NUL-stdin case passes. Round seven: </dev/null test with exit 42, a data row for an MSYS-opened /dev/null.
+
+Commit 31a10b0: </dev/null inside Git Bash asserted with exit 42, N5 data row, [arguments] with stdin x. Both reviewers GO; CI 45601335472 running.
+
+Commits (git log 65c7dee..262bc95, bootstrap/test/): 174fc8f a2c12da d822139 78a5d2e 3f6487a f12fa1d 31a10b0. Landed on main by fast-forward to 262bc95 (PR 1).
