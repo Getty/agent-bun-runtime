@@ -515,8 +515,12 @@ checked.)
 MSYS runtime passes it on. Exit codes 0, 1, 2, 7 and 42 come back unchanged by `exec`,
 with stdin on a pipe (executed, CI run 45579886904, commit `78a5d2e`, both legs, same
 image and versions as above, MSYS runtime 3.6.10-5a1665c8). On the empty-pipe path of
-the NUL-stdin limit exit 0 comes back (executed, CI 45597390051, commit `f12fa1d`); a
-non-zero code on that path: not checked on Git Bash yet. The suite reads these codes
+the NUL-stdin limit exit 0 comes back (executed, CI 45597390051, commit `f12fa1d`), and
+so does 42: `exec sh getty-bun.sh run entries/echo.ts 42 < /dev/null` inside
+`bin\bash.exe`, with `x` on bash's own stdin, returned 42 with empty stdout and no
+timeout (executed, CI 45601335472, commit `31a10b0`, jobs 139160728685, 139160728299
+and 139160727955; that this `/dev/null` takes the empty pipe: source, with the `chr` it
+shows in the NUL-stdin limit). The suite reads these codes
 through `Bun.spawn`, whose exit code on Windows is only the low byte of the real one
 (source-checked, Bun 1.4.5 `src/spawn/process.rs`). The full code, read as
 `$LASTEXITCODE` by an outer Windows PowerShell 5.1 `powershell.exe` with `x` on stdin:
@@ -571,8 +575,16 @@ terminated no process. A raw `powershell.exe` under MSYS with that stdin still b
 the MSYS behavior itself is unchanged. (Executed, CI 45597390051, commit `f12fa1d`, in
 each of the three Windows test jobs 139146959172, 139146959347 and 139146959363. The
 rule itself: source, `getty-bun.sh` `forward_to_powershell`, and the local check above,
-k18.) On that path the shell waits for PowerShell, with its own traps removed: a signal
-sent to the shell's PID ends only the shell, and PowerShell and Bun keep running (local
+k18.) A `/dev/null` that bash opens itself (`exec </dev/null` inside `bin\bash.exe`,
+with `x` on bash's own stdin) is a character device as well (`chr`), so the forwarding
+gives it the empty pipe too; yet a raw `powershell.exe` reading it prints True and reads
+0 bytes without blocking. In these rows only the inherited NUL handle blocks (row c timed
+out again). So far as this row shows, such a `/dev/null` needs no empty pipe; through
+the pipe the entry's code still comes back (42, see the exit-code limit). (Executed, CI
+45601335472, commit `31a10b0`, jobs 139160728685, 139160728299 and 139160727955; that it
+takes the empty pipe: source; the cause inside MSYS: not checked.) On the empty-pipe
+path the shell waits for PowerShell, with its own traps removed: a signal sent to the
+shell's PID ends only the shell, and PowerShell and Bun keep running (local
 check on Linux with a fake PowerShell, which shows it for PowerShell only; on Git Bash:
 not checked; k13). Before the rule, such a hang could leave `bun.exe` behind (executed:
 the runner terminated an orphaned bash, powershell and bun at the end of each of the

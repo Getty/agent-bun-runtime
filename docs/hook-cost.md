@@ -96,8 +96,9 @@ of runs 2 and 3):
   (554 against 461 ms in run 2, 576 against 482 ms in run 3). By reading the forwarding
   code, not measured part by part, that is the `bash.exe` start (wrapper and MSYS bash),
   `uname`, the `cygpath` calls and the exec. The forwarding's check for a `/dev/null`
-  stdin (two builtin `test`s before the exec) came after these runs: not measured. A
-  stdin that carries data is no NUL device, so the forwarding keeps the exec.
+  stdin (two builtin `test`s before the exec) came after these runs: not measured. The
+  check takes the empty-pipe path only for a character device that is not a terminal; a
+  pipe or a file is neither, so the forwarding keeps the exec for a hook's stdin.
   `measure-hook.ts` passes the hook JSON as a buffer, which `Bun.spawn` writes to a pipe
   (source-checked). Claude Code sends the hook JSON on stdin and then ends it (measured
   by windows-developer, `docs/hook-start-windows.md` there); that its stdin is a pipe is
