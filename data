@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-25T17:57:37Z
+id: 28
+priority: high
+status: backlog
+tags:
+- sdk
+- phase-3a
+title: 'SDK: a git-commit pin gets no dist/ (decide before the 3a port)'
+updated: 2026-11-25T17:57:37Z
+---
+
+Found in k21. The package ships dist/ (JavaScript plus declarations, ADR 0006), built by prepack; dist/ is gitignored. ADR 0006/0008: until the first release consumers pin a git commit of Getty/agent-bun-runtime. A git dependency then has no dist/, unless the installer builds it (whether Bun runs prepare/prepack for a git dependency: not checked). briefing in phase 3a is the first consumer to hit this. Options: a prepare script (check what Bun does for git deps), a packed tarball of the commit as the build input, committed dist/, or a bun export condition to src/ (handoff B.1 warns against two implementations under different conditions). Decide before the 3a port; an ADR note if the pinning rule changes.
