@@ -720,7 +720,8 @@ describe(`scenario 11: Git Bash forwarding shares slot and lock with PowerShell 
     const sb = await sandbox({ mirror: server.url });
     // "/c/Users/x" and "/tmp/a b" look like POSIX paths: MSYS must not convert them
     const args = ["with space", 'say "hi"', "trailing\\", "", "/c/Users/x", "/tmp/a b"];
-    const r = await viaBash(sb, ["run", "entries/info.ts", ...args]);
+    // a real stdin ("x"): hooks have one, so this takes the forwarding's exec path, not the empty-pipe path of a NUL stdin
+    const r = await viaBash(sb, ["run", "entries/info.ts", ...args], { stdin: "x" });
     expectExit(r, 0);
     expect(JSON.parse(r.out).argv).toEqual(args);
   });
@@ -789,8 +790,9 @@ describe(`scenario 11: Git Bash forwarding shares slot and lock with PowerShell 
 
   // ASSERTED, Windows only: stdin redirected to /dev/null INSIDE Git Bash (the path a user or a
   // host script types). The harness gives bash a real stdin ("x"), so only the /dev/null that MSYS
-  // itself opens reaches the starter. Claim: the starter ends (exit 0, empty stdout, within 20 s)
-  // when its fd 0 is an MSYS-opened /dev/null. It also passes if MSYS-opened /dev/null never hung;
+  // itself opens reaches the starter. Claim: the starter ends within 20 s with the entry's own
+  // exit code (42, which also exercises the non-zero exit of the forwarding pipeline) and empty
+  // stdout when its fd 0 is an MSYS-opened /dev/null. It also passes if MSYS-opened /dev/null never hung;
   // it does not cover the inherited NUL case (the direct usr\bin\bash.exe test above does). It
   // uses bin\bash.exe, the Git Bash a user or host finds first.
   t(name + " [stdin </dev/null redirected inside Git Bash]", async () => {
@@ -799,11 +801,11 @@ describe(`scenario 11: Git Bash forwarding shares slot and lock with PowerShell 
     await install(sb);
     const starterPath = join(sb.root, "bootstrap", "getty-bun.sh").replace(/\\/g, "/");
     const r = await run(
-      [bashExe!, "-c", 'exec sh "$1" run entries/echo.ts 0 < /dev/null', "_", starterPath],
+      [bashExe!, "-c", 'exec sh "$1" run entries/echo.ts 42 < /dev/null', "_", starterPath],
       { env: sb.env, cwd: sb.cwd, stdin: "x", timeoutMs: 20_000 }, // run() kills the tree on a timeout
     );
     if (r.timedOut) throw new Error(`the starter hung with fd 0 = /dev/null inside Git Bash (killed after ${r.ms | 0} ms); stderr ${JSON.stringify(r.err)}`);
-    expectExit(r, 0);
+    expectExit(r, 42);
     expect(r.stdout.length).toBe(0);
   });
 
@@ -836,6 +838,17 @@ describe(`scenario 11: Git Bash forwarding shares slot and lock with PowerShell 
       console.log(`[data] stdin=${kind} row d: forwarding run with MSYS=disable_pcon: exit ${d.code}, timedOut ${d.timedOut}, stdout bytes ${d.stdout.length}, stderr ${JSON.stringify(d.err.slice(0, 300))}`);
     });
   }
+  // Data only, 10 s bound (run() kills the tree on a timeout): an /dev/null that MSYS bash itself
+  // opens, going into a native program. The harness gives bash a real stdin ("x"), so this is not
+  // the inherited NUL. It may time out; that is data. Compare with row c (inherited fd 0).
+  t(name + " [stdin diagnostics, MSYS-opened /dev/null into a native powershell.exe, data only]", async () => {
+    const server = await realServer();
+    const sb = await sandbox({ mirror: server.url });
+    const script = `exec </dev/null; [ -c /dev/stdin ] && echo chr || echo notchr; ${psRead}`;
+    const r = await run([bashExe!, "-c", script], { env: { ...sb.env, ...noConv }, cwd: sb.cwd, stdin: "x", timeoutMs: 10_000 });
+    console.log(`[data] MSYS-opened /dev/null into native powershell.exe (stdin x from the harness): exit ${r.code}, timedOut ${r.timedOut}, stdout ${JSON.stringify(r.out)}, stderr ${JSON.stringify(r.err.slice(0, 300))}`);
+  });
+
   for (const bi of [0, 1]) {
     for (const [kind, so] of stdinKinds.slice(0, 2)) {
       const bl = bi === 0 ? "bin\\bash.exe (wrapper)" : "usr\\bin\\bash.exe (direct)";

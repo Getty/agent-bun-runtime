@@ -32,9 +32,10 @@ usage() {
 
 # Under Git Bash, MSYS2 and Cygwin the PowerShell starter owns the slot and its lock, so
 # this starter hands every call to the getty-bun.ps1 next to it, arguments unchanged, by
-# exec: exit code, stdin, stdout and stderr are PowerShell's. A /dev/null stdin is the one
-# exception: PowerShell reads an empty pipe instead, and its exit code becomes this
-# shell's. Must not return.
+# exec: exit code, stdin, stdout and stderr are PowerShell's. The one exception is a stdin
+# that is a character device but no terminal (/dev/null, but also /dev/zero, /dev/urandom,
+# /dev/full or /dev/clipboard, which PowerShell then reads as empty input): PowerShell
+# gets an empty pipe instead, and its exit code becomes this shell's. Must not return.
 forward_to_powershell() {
   _ps1=${0%.sh}.ps1
   [ -f "$_ps1" ] || fail "under $os this starter forwards to $(one_line "$_ps1"), which is missing"
