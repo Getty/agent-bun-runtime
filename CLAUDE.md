@@ -14,18 +14,25 @@ Write repository content in **English**.
 - **Plan and phase gates:** [docs/plan.md](docs/plan.md). It adapts
   [the handoff](docs/handoff/2026-11-25-bun-runtime-handoff.md); where they disagree, the
   plan wins.
-- **Invariants, layout, checks:** skill [getty-bun-core](.claude/skills/getty-bun-core/SKILL.md).
+- **Decisions:** [docs/adr/](docs/adr/).
+- **Invariants, layout, checks:** skills [getty-bun-core](.claude/skills/getty-bun-core/SKILL.md),
+  [getty-bun-bootstrap](.claude/skills/getty-bun-bootstrap/SKILL.md),
+  [getty-bun-windows](.claude/skills/getty-bun-windows/SKILL.md).
 - **Ownership and verification:** [.claude/rules/getty-bun-rules.md](.claude/rules/getty-bun-rules.md).
-- **Runtime contract:** skill `getty-bun-integration` (contract proposal v0.1; v0.2 is
-  phase 0 work).
+- **Runtime contract:** skill `getty-bun-integration` (contract proposal v0.2).
 
 ## The agent team
 
 - `getty-bun-scout`: reads and reports; changes nothing.
-- `getty-bun-worker`: bootstrap scripts, SDK source, manifests; never commits.
-- `getty-bun-test-writer`: writes tests; leaves implementation to the worker.
-- `getty-bun-reviewer`: reviews changes and runs checks; changes no files.
+- `getty-bun-posix-worker`, `getty-bun-windows-worker`: the two starters.
+- `getty-bun-sdk-worker`, `getty-bun-codex-worker`, `getty-bun-claude-worker`: the SDK
+  core and its host codecs.
+- `getty-bun-ci-worker`: GitHub Actions.
+- `getty-bun-bootstrap-test-writer`, `getty-bun-sdk-test-writer`: tests only.
+- `getty-bun-reviewer`, `getty-bun-windows-reviewer`: review and checks; change nothing.
 - `getty-bun-release-manager`: owns authorized commits, `Changes` and release checks.
+
+Lanes: [.claude/rules/getty-bun-rules.md](.claude/rules/getty-bun-rules.md).
 
 Work belongs on the karr board (`karr list --compact`). Newly created agents may require a
 fresh Claude Code session.
@@ -34,10 +41,12 @@ fresh Claude Code session.
 
 `.claude/skilletor.json` declares sources and the `getty-house` bundle.
 `skilletor sync --scope project` installs shared files; edit managed copies at their
-source. Project agents, `getty-bun-core`, settings and skilletor configuration are
-tracked; installed rules/skills, the lock and local settings are not.
+source. Project agents, the three `getty-bun-*` skills, settings and skilletor
+configuration are tracked; installed rules/skills, the lock and local settings are not.
 
 ## Rules
 
-- Nothing is pushed, tagged or published (npm included) without explicit authorization.
-- Never touch the real `~/.getty/runtimes` in a test: use an isolated `HOME`.
+- Nothing is tagged or published (npm included) without explicit authorization. Pushing
+  work branches for CI is authorized; `main` gets reviewed work only.
+- Never touch the real `~/.getty` in a test: set `GETTY_HOME` (and `HOME`, `CODEX_HOME`
+  for host runs) to a temporary directory.

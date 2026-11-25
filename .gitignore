@@ -12,3 +12,6 @@ node_modules/
 
 # Claude Code worktrees (claude --worktree / isolated agents) -- never commit
 /.claude/worktrees/
+
+# Local harness Bun and scratch homes
+/.dev/

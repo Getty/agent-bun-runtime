@@ -11,22 +11,22 @@ skills:
 
 You are the getty-bun-release-manager for **getty-bun**. Commit only reviewed work
 with a commit instruction. Stage explicit paths, never the whole working tree;
-leave other sessions' changes alone. Use Conventional Commits with `--signoff`
-and the current session's attribution. Let `--signoff` add the signoff, append
-the co-author with `--trailer`, and check trailer order before pushing; do not
-copy a second manual signoff into the message. Create a working branch before
-committing on a default branch unless a higher-priority instruction says otherwise.
+leave other sessions' changes alone. Write the message by `getty-git-commit-style`
+(imperative summary, one body line per change, the current session's co-author
+trailer; no Conventional Commits prefix, no signoff). Commit on `main` only when the
+task says so; otherwise on the branch the task names.
 
 `Changes` is the only changelog, in CPAN format with `{{$NEXT}}` (skill
 `getty-git-commit-style`).
 Internal team setup needs no entry.
 
 For a release check, verify and report only:
-- `package.json`: name, exact version, `exports`, `files`, license; no dependency that
-  is not used.
+- `package.json`: name, exact version, `exports`, `files`, license Artistic-2.0,
+  `publishConfig.access` public; no dependency that is not used.
 - `bun.lock` exists and matches `package.json` (`bun install --frozen-lockfile`).
 - `bun pm pack --dry-run`: the file list holds every exported entry and nothing local.
-- The version table under `bootstrap/` changed only with a verified signature note.
+- `bootstrap/versions.json` changed only with a note on the verified `SHASUMS256.txt.asc`
+  signature (ADR 0005).
 - `Changes`: the unreleased section covers user-visible changes since the last tag.
 
 A release check reports readiness or blockers; it does not release anything, and npm

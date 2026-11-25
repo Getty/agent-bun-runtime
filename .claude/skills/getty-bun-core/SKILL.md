@@ -1,53 +1,49 @@
 ---
 name: getty-bun-core
-description: Use when changing getty-bun - the bootstrap starter and installer under bootstrap/, the @getty/bun-runtime SDK, its tests, manifests or plan.
+description: Use when changing getty-bun - the bootstrap starters under bootstrap/, the @getty/bun-runtime SDK, tests, CI or the plan.
 ---
 
 # getty-bun core
 
 Two products in one repository. Read [docs/plan.md](../../../docs/plan.md) for the phase
-you are in; implement only that phase's gate.
+you are in and implement only that phase's gate and the MVP column; decisions are in
+[docs/adr/](../../../docs/adr/).
 
 | Path | Product | Runs before Bun exists? |
 |---|---|---|
-| `bootstrap/` | Starter and installer (`getty-bun.sh`, later `getty-bun.ps1`), version table | **Yes**: POSIX shell plus `curl`/`wget`, `unzip`, `sha256sum`, `flock` only |
-| repo root (`src/`, `package.json`, `bun.lock`) | `@getty/bun-runtime` | No: runs on the bound Bun |
+| `bootstrap/` | `getty-bun.sh`, `getty-bun.ps1`, `versions.json`, pin render, scenario suite | **Yes**: details in skill `getty-bun-bootstrap` |
+| repo root (`src/`, `package.json`, `bun.lock`) | `@getty/bun-runtime` | No: runs on the pinned Bun |
 
-## Invariants
+## Rules for both
 
-- **Exact pin.** A consumer's `package.json` carries `gettyBun.contractVersion` and one
-  exact `gettyBun.bunVersion` (`major.minor.patch`, nothing else).
-- **Slots.** `~/.getty/runtimes/bun/<version>/<target>/bin/bun`, plus `receipt.json`.
-  Locks in `bun/.locks/<version>/<target>/`, staging in `bun/.staging/<id>/` on the same
-  filesystem. A published slot is never overwritten.
-- **Absolute executable.** Run the validated absolute Bun with `--no-install`. Never PATH,
-  a `current` link, `bun upgrade`, `bunx` or a shebang as version selection.
-- **Who installs.** Only the starter installs (`ensure`, on `SessionStart` after a plugin
-  install or update, and on explicit repair). `@getty/bun-runtime` never installs, fetches
-  packages or edits lockfiles, not even in `doctor`.
-- **Lock.** One process holds the OS lock (`flock` on Linux) across download, verify and
-  publish. `.installing` is diagnostics, not ownership. Never delete a lock because a PID
-  looks dead.
-- **Integrity.** SHA256 comes from the reviewed version table, never from a file next to
-  the archive. Verify before unpacking; the archive must hold exactly the expected member;
-  `bun --version` must equal the pin before publishing.
-- **Consumer dependencies.** Check that `bun.lock` exists, then
-  `bun install --frozen-lockfile` under the consumer's own lock; publish the binding only
-  after it passes.
-- **Streams.** stdout belongs to the host protocol (hook JSON, MCP). Installer progress
-  and diagnostics go to stderr or a log file.
-- **No side effects.** No PATH or shell startup edits, no official Bun install script, no
-  system packages.
+- **Small first.** Build what the plan's MVP lists. Anything else goes to a card, not
+  into the code.
+- **Streams.** stdout belongs to the host protocol (hook JSON). Diagnostics go to stderr.
+- **Bundle-friendly SDK.** ESM, no dynamic requires, no reads of its own package files
+  at runtime: consumers bundle it (ADR 0003).
+- **Isolation.** Tests set `GETTY_HOME` (and `HOME`, `CODEX_HOME` where a host is
+  involved) to a fresh temporary directory. Never touch the real `~/.getty`, `~/.codex`
+  or `~/.claude`.
+- **No side effects** on the developer machine: no system packages, no PATH or profile
+  edits, no official Bun install script.
 
 ## Evidence
 
 Label every compatibility claim: source-checked, schema-checked, executed (with command,
 host version and platform), or not checked. A mocked stdin/stdout test proves the codec,
-not the host. Tests never touch the real `~/.getty/runtimes` or `~/.codex`: set `HOME`
-and `CODEX_HOME` to a temporary directory.
+not the host. A claim about Windows needs a run on Windows (CI `windows-latest` or the
+windows-developer hub); this machine has no PowerShell.
+
+## Tooling on this machine
+
+No Bun, no `pwsh`, no `shellcheck` (2026-11-25). For a local harness Bun, run the
+starter itself with `GETTY_HOME=<repo>/.dev/getty` once it exists; before that, fetch the
+pinned archive into `.dev/` and check its SHA256 against `bootstrap/versions.json`.
+`.dev/` is gitignored. CI on GitHub Actions is the gate for Windows, arm64 and
+`shellcheck`.
 
 ## Checks
 
-Until code exists there is nothing to run. Once phase 1 and 2 land: `bun test` for the
-SDK, the bootstrap test suite under `bootstrap/` against an isolated `HOME`, and
-`shellcheck bootstrap/*.sh`. Record the exact commands here when they exist.
+Until code exists there is nothing to run. Record the exact commands here when they
+exist (expected: `bun test` for the SDK, `bun test bootstrap/test` for the scenario
+suite, `shellcheck bootstrap/getty-bun.sh`).
