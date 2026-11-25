@@ -1,0 +1,18 @@
+---
+class: standard
+created: 2026-11-25T08:01:33Z
+id: 13
+priority: medium
+status: backlog
+tags:
+- bootstrap
+- windows
+title: 'Windows starter: bun.exe outlives a host kill of PowerShell (job object)'
+updated: 2026-11-25T10:59:02Z
+---
+
+getty-bun.ps1 runs bun.exe as a child through System.Diagnostics.Process. A host that kills the PowerShell process tree only by PID, for example on a hook timeout, leaves bun.exe running, with its pipes broken. The fix would be to assign bun.exe to a job object with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE through Add-Type. But that is a C# compile on every hook, about 100+ ms, unless the type is precompiled or cached. Measure the cost first. Real-host check: which hosts actually kill only the PID (Codex timeout, Claude Code timeout). That is a card on the windows-developer board through the hub, drafted in the phase 1 report.
+
+Phase 1 round six: when stdin is a non-tty character device (/dev/null), the Git Bash forwarding no longer execs PowerShell but runs it in a pipeline (: | powershell; exit $?). On that path a signal sent to the shell's PID ends only the shell, and PowerShell and Bun keep running (executed on Linux with a fake PowerShell; on Git Bash: not checked). A crash NTSTATUS also maps differently there: through exec 2816/1024/1792/512/127, through the pipeline 139/132/135/130 (source-checked, msys2-runtime pinfo.cc, Windows reviewer).
+
+Correction to the previous note: STATUS_NO_MEMORY maps to SIGBUS, which is 10 under Cygwin (BSD numbering, cygwin/signal.h), so through exec the host sees 2560 (not 1792) and through the pipeline 138 (not 135). The other values stand: 2816/139 access violation, 1024/132 illegal instruction, 512/130 Ctrl+C exit, 127/127 others (source-checked, git-for-windows/msys2-runtime 5a1665c8, Windows reviewer).
