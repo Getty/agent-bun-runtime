@@ -32,7 +32,9 @@ usage() {
 
 # Under Git Bash, MSYS2 and Cygwin the PowerShell starter owns the slot and its lock, so
 # this starter hands every call to the getty-bun.ps1 next to it, arguments unchanged, by
-# exec: exit code, stdin, stdout and stderr are PowerShell's. Must not return.
+# exec: exit code, stdin, stdout and stderr are PowerShell's. A /dev/null stdin is the one
+# exception: PowerShell reads an empty pipe instead, and its exit code becomes this
+# shell's. Must not return.
 forward_to_powershell() {
   _ps1=${0%.sh}.ps1
   [ -f "$_ps1" ] || fail "under $os this starter forwards to $(one_line "$_ps1"), which is missing"
@@ -68,6 +70,17 @@ forward_to_powershell() {
   MSYS_NO_PATHCONV=1
   MSYS2_ARG_CONV_EXCL='*'
   export MSYS_NO_PATHCONV MSYS2_ARG_CONV_EXCL
+  # Under MSYS a native program whose stdin is /dev/null (MSYS's name for a NUL handle, as
+  # Bun's stdin "ignore" gives) may block reading it; an empty pipe reads as end of input
+  # (bootstrap/README.md, "Limit: Git Bash with a NUL stdin"). So a stdin that is a
+  # character device but no terminal becomes an empty pipe; a terminal, pipe, file or
+  # closed stdin still goes to PowerShell by exec.
+  if [ ! -t 0 ] && [ -c /dev/stdin ]; then
+    # Nothing to clean up here, and the signal trap's message would be wrong once Bun runs.
+    trap - EXIT HUP INT TERM
+    : | "$_ps" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$_ps1w" "$@"
+    exit $?
+  fi
   exec "$_ps" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$_ps1w" "$@"
 }
 

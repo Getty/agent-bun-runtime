@@ -48,8 +48,11 @@ below are behavior.
   `https://github.com/oven-sh/bun/releases/download` (for Bun's own assets this is the
   plan's `bun-<target>.zip`). `GETTY_BUN_MIRROR` takes the downloader's schemes:
   `getty-bun.sh` those of curl (http, https, file, ...) or, without curl, of wget (http,
-  https, ftp; no file); `getty-bun.ps1` http, https and file (file executed on
-  PowerShell 7 on Linux only).
+  https, ftp; no file); `getty-bun.ps1` http, https and file. (file with curl: executed,
+  CI 45589361806, scenario jobs linux-x64 139119150180 and linux-arm64 139119150223; the
+  wget path: not checked, the suite never runs it. file with `getty-bun.ps1`: executed,
+  CI 45589361806, scenario jobs Windows PowerShell 5.1 139119150551 and PowerShell 7
+  139119150607, and on PowerShell 7 on Linux.)
 - `sha256`: the archive's SHA256, 64 lowercase hex digits, copied from the signature-
   verified `SHASUMS256.txt` (below). The starter checks it before unpacking; it never
   reads a checksum from a file next to the archive.
@@ -487,46 +490,64 @@ before phase 3a. (Not checked.)
 `*_NT-*`, `getty-bun.sh` forwards every call to the `getty-bun.ps1` next to it
 (`${0%.sh}.ps1`), so both starters share slot and lock. It runs Windows PowerShell
 5.1 from `$SYSTEMROOT\System32\WindowsPowerShell\v1.0\powershell.exe` (else
-`powershell.exe` or `pwsh.exe` on `PATH`) with the flags above, by `exec`, arguments
-unchanged; streams are PowerShell's; exit code: see the limit below. It needs
-`cygpath`. A `GETTY_HOME` starting with `/` is converted with `cygpath -w`; an empty or
-relative one passes unchanged and is rejected by `getty-bun.ps1`. A missing
+`powershell.exe` or `pwsh.exe` on `PATH`) with the flags above, by `exec` (with a
+`/dev/null` stdin through an empty pipe, see the NUL-stdin limit below), arguments
+unchanged; streams are PowerShell's; exit code: see the limit below. It needs `cygpath`.
+A `GETTY_HOME` starting with `/` is converted with `cygpath -w`; an empty or relative
+one passes unchanged and is rejected by `getty-bun.ps1`. A missing
 `getty-bun.ps1`, `cygpath` or PowerShell fails with one `getty-bun: ` line. (Shared slot
 and lock under Git Bash: executed, CI 45572032454. The converted `GETTY_HOME`, the
-failure lines and the unchanged arguments: executed on Linux only, with a fake `cygpath`
-and PowerShell under dash, bash and BusyBox sh; on Git Bash: not checked.)
+failure lines, the unchanged arguments and the stdin rule of the NUL-stdin limit:
+executed on Linux only, with a fake `cygpath` and PowerShell under dash, bash and BusyBox
+sh; on Git Bash: not checked.)
 
 **Limit: PowerShell blocked by policy.** Where AppLocker or App Control (WDAC) blocks
-`powershell.exe`, the forwarding's executable check still passes and `exec` fails: the
-caller sees exit 126 and the shell's own error line, not a `getty-bun: ` line. (Not
+`powershell.exe`, the forwarding's executable check still passes and starting it fails:
+the caller sees exit 126 and the shell's own error line, not a `getty-bun: ` line. (Not
 checked.)
 
 **Limit: exit codes through Git Bash.** The caller gets PowerShell's exit code as the
 MSYS runtime passes it on. Exit codes 0, 1, 2, 7 and 42 come back unchanged (executed,
 CI run 45579886904, commit `78a5d2e`, both legs, same image and versions as above, MSYS
-runtime 3.6.10-5a1665c8), which shows each code modulo 256 only, since the harness sees
-only the low byte; the 32-bit observer is the TODO below. Codes above 255 are not shown:
-the suite observes them through `Bun.spawn`, whose exit code on Windows is only the low
-byte of the real one (source-checked, Bun 1.4.5 `src/spawn/process.rs`), so its 0 for
-256 and 5 for `0xC0000005` say nothing about the entry, the starter or Git Bash.
-TODO (k9): the 32-bit result from a PowerShell `$LASTEXITCODE` observer. The forwarding
+runtime 3.6.10-5a1665c8); the suite reads them through `Bun.spawn`, whose exit code on
+Windows is only the low byte of the real one (source-checked, Bun 1.4.5
+`src/spawn/process.rs`). The full code, read as `$LASTEXITCODE` by an outer Windows
+PowerShell 5.1 `powershell.exe` with `x` on stdin: an entry's `process.exit(256)` gives
+0 and `process.exit(3221225477)` gives 5, alike through bare `bun.exe`, through the
+starter called directly (5.1 and 7 legs) and through the `bin\bash.exe` forwarding
+(executed, CI 45589361806, commit `3f6487a`, jobs 139119150551, 139119150607 and
+139119150205). So Bun 1.4.5 on Windows itself exits with the low byte of the entry's
+code, and the starters and the forwarding pass on what Bun exits with, unchanged, for
+these values: an entry's exit code on Windows is 0 to 255. The forwarding
 runs Windows PowerShell 5.1 when `$SYSTEMROOT` has it (source-checked, `getty-bun.sh`
 `forward_to_powershell`; executed but indirect: in the pwsh scenario job 139086960775
 of CI 45579886904 the orphaned process left by the forwarded call is named
 `powershell`, not `pwsh`). What the NTSTATUS of a native crash becomes through Git
 Bash: not measured.
 
-**Limit: Git Bash with a NUL stdin.** Git for Windows' `bin\bash.exe` started with a NUL
-stdin while a console is present: an entry that reads stdin may block until the host's
-timeout (seen in CI 45579886904 under a shared console; cause not confirmed, see the
-MSYS2 and wrapper analysis on k9). After such a hang `bun.exe` may stay behind
-(executed: the runner terminated an orphaned bash, powershell and bun at the end of
-each of the three Windows scenario jobs of CI 45579886904; k13). (The hang: executed,
-CI 45579886904; its cause: not checked.) Hook input on a pipe is not affected as far as
-shown: a pipe with data through `bin\bash.exe` passes (executed, CI 45579886904); a pipe
-closed at once through the wrapper: not checked yet, it runs in the next CI run. That
-hosts pass hook input on a pipe is measured for Claude Code by the windows-developer
-repository (`docs/hook-start-windows.md` there); for Codex: not measured.
+**Limit: Git Bash with a NUL stdin.** Git Bash started with a NUL handle as stdin (what
+Bun's stdin `"ignore"` or an empty buffer gives) shows fd 0 as `/dev/null`, `[ -t 0 ]`
+false. An MSYS program reading it gets end of input at once (`cat | wc -c` prints 0),
+but a native program started with that fd 0 blocks: `powershell.exe` prints
+`[Console]::IsInputRedirected` as True and then blocks in `Read`, and the forwarded call
+blocks too, also with `MSYS=disable_pcon`. Git for Windows' `bin\bash.exe` wrapper is
+not the cause: `usr\bin\bash.exe` started directly blocks the same way. A pipe closed at
+once is not affected: MSYS shows `pipe:[0]`, `powershell.exe` reads 0 bytes and the
+forwarded call exits 0. (Executed, CI 45589361806, commit `3f6487a`, rows a to d of the
+stdin diagnostics and the asserted `usr\bin\bash.exe` case, in each of the three Windows
+test jobs 139119150551, 139119150607 and 139119150205; the cause inside MSYS: not
+checked.) The forwarding therefore gives PowerShell an empty pipe (`: | powershell.exe
+...`, then `exit $?`) when stdin is a character device but no terminal, and keeps `exec`
+for a terminal, pipe, file or closed stdin. On that path the shell stays PowerShell's
+parent with its own traps removed: a signal sent to the shell ends the shell, not
+PowerShell. (The rule: source, `getty-bun.sh` `forward_to_powershell`, executed on Linux
+only, see above; its effect on Git Bash: not checked yet, it runs in the next CI run.)
+Before this rule, such a hang could leave `bun.exe` behind (executed: the runner
+terminated an orphaned bash, powershell and bun at the end of each of the three Windows
+test jobs of CI 45579886904; k13). A pipe with data through `bin\bash.exe` passes
+(executed, CI 45579886904). That hosts pass hook input on a pipe is measured for Claude
+Code by the windows-developer repository (`docs/hook-start-windows.md` there); for
+Codex: not measured.
 
 **Limit: MSYS path conversion.** The forwarding sets `MSYS_NO_PATHCONV=1` and
 `MSYS2_ARG_CONV_EXCL='*'` so that the MSYS runtime does not rewrite arguments that look

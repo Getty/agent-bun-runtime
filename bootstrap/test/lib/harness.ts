@@ -101,7 +101,7 @@ export function startServer(
       const body = routes[path];
       if (!body) return new Response("not found", { status: 404 });
       if (opts.delayMs) await Bun.sleep(opts.delayMs);
-      return new Response(body, {
+      return new Response(body as unknown as BodyInit, { // typing only: Uint8Array<ArrayBufferLike> vs BodyInit in @types/bun 1.3.0
         headers: { "content-type": "application/zip", "content-length": String(body.length) },
       });
     },

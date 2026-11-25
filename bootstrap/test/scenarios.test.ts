@@ -679,12 +679,13 @@ describe(`scenario 11: Git Bash forwarding shares slot and lock with PowerShell 
         ["bin\\bash.exe forwarding", [bashExe!, join(sb.root, "bootstrap", "getty-bun.sh").replace(/\\/g, "/"), "run", "entries/echo.ts", String(code)]],
       ];
       for (const [label, argv] of layers) {
-        const script = `${call(argv)}; [Console]::Out.Write($LASTEXITCODE)`;
+        const script = `${call(argv)}; [Console]::Out.Write('code=' + $LASTEXITCODE)`;
         const r = await run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script], {
           env: sb.env, cwd: sb.cwd, timeoutMs: 20_000,
           stdin: "x", // a real stdin, so this measures the exit code and not the NUL-stdin hang
         });
-        console.log(`[data] 32-bit exit code, entry exits ${code}, via ${label}: $LASTEXITCODE printed ${JSON.stringify(r.out)}, outer exit ${r.code}, timedOut ${r.timedOut}, stderr ${JSON.stringify(r.err.slice(0, 200))}`);
+        const m = r.out.match(/code=(-?\d+)\s*$/); // the marker separates the echoed stdin from the code
+        console.log(`[data] 32-bit exit code, entry exits ${code}, via ${label}: $LASTEXITCODE = ${m ? m[1] : "(no code= marker)"}, echoed output ${JSON.stringify(m ? r.out.slice(0, m.index) : r.out)}, outer exit ${r.code}, timedOut ${r.timedOut}, stderr ${JSON.stringify(r.err.slice(0, 200))}`);
       }
     });
   }
@@ -786,6 +787,26 @@ describe(`scenario 11: Git Bash forwarding shares slot and lock with PowerShell 
     expect(r.stdout.length).toBe(0);
   });
 
+  // ASSERTED, Windows only: stdin redirected to /dev/null INSIDE Git Bash (the path a user or a
+  // host script types). The harness gives bash a real stdin ("x"), so only the /dev/null that MSYS
+  // itself opens reaches the starter. Claim: the starter ends (exit 0, empty stdout, within 20 s)
+  // when its fd 0 is an MSYS-opened /dev/null. It also passes if MSYS-opened /dev/null never hung;
+  // it does not cover the inherited NUL case (the direct usr\bin\bash.exe test above does). It
+  // uses bin\bash.exe, the Git Bash a user or host finds first.
+  t(name + " [stdin </dev/null redirected inside Git Bash]", async () => {
+    const server = await realServer();
+    const sb = await sandbox({ mirror: server.url });
+    await install(sb);
+    const starterPath = join(sb.root, "bootstrap", "getty-bun.sh").replace(/\\/g, "/");
+    const r = await run(
+      [bashExe!, "-c", 'exec sh "$1" run entries/echo.ts 0 < /dev/null', "_", starterPath],
+      { env: sb.env, cwd: sb.cwd, stdin: "x", timeoutMs: 20_000 }, // run() kills the tree on a timeout
+    );
+    if (r.timedOut) throw new Error(`the starter hung with fd 0 = /dev/null inside Git Bash (killed after ${r.ms | 0} ms); stderr ${JSON.stringify(r.err)}`);
+    expectExit(r, 0);
+    expect(r.stdout.length).toBe(0);
+  });
+
   // Data only, never asserted: what MSYS makes of each kind of stdin, 10 s per row. One test per
   // stdin kind (and per bash executable in the second group) keeps each under the test timeout.
   const stdinKinds: Array<[string, { stdin?: Uint8Array; closePipe?: boolean }]> = [
@@ -802,8 +823,9 @@ describe(`scenario 11: Git Bash forwarding shares slot and lock with PowerShell 
       const sb = await sandbox({ mirror: server.url });
       await install(sb);
       const rows: Array<[string, string]> = [
-        ["a: [ -t 0 ] and fd 0", "[ -t 0 ] && echo tty || echo notty; readlink /proc/self/fd/0"],
+        ["a: [ -t 0 ], [ -c /dev/stdin ] and fd 0", "[ -t 0 ] && echo tty || echo notty; [ -c /dev/stdin ] && echo chr || echo notchr; readlink /proc/self/fd/0"],
         ["b: MSYS child cat | wc -c", "cat | wc -c"],
+        // row c is expected to time out with /dev/null: it bypasses the starter and documents the MSYS behavior
         ["c: native powershell.exe reading stdin", psRead],
       ];
       for (const [label, script] of rows) {
