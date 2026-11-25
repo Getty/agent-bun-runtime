@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-25T08:16:32Z
+id: 16
+priority: low
+status: backlog
+tags:
+- bootstrap
+- windows
+title: 'Windows starter under Constrained Language Mode: check or document'
+updated: 2026-11-25T08:16:32Z
+---
+
+getty-bun.ps1 calls .NET types directly ([System.IO.File], System.Diagnostics.Process, HttpWebRequest, Add-Type at install). Under Constrained Language Mode (AppLocker/WDAC script enforcement) most of that is refused, so the starter probably cannot run at all, not just fall back to windows-x64-baseline. The README labels this not checked. CI runners run FullLanguage. Either fail with one clear getty-bun line when $ExecutionContext.SessionState.LanguageMode is not FullLanguage, or document the requirement. The real check needs a WDAC-enforced host: a card on the windows-developer board through the hub.
