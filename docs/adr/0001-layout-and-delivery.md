@@ -1,6 +1,7 @@
 # 0001: One repository, two products; bootstrap delivered as a template
 
-Status: accepted, 2026-11-25 (owner: provider is a template, not a CLI).
+Status: accepted, 2026-11-25 (owner: provider is a template, not a CLI);
+repository name superseded by [0008](0008-repository-and-package-name.md).
 
 ## Context
 

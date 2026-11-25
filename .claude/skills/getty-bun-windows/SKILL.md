@@ -160,7 +160,8 @@ powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 
   (`-1073741795`) publishes nothing; then install `windows-x64-baseline` under its own
   lock, as Bun's `install.ps1` does. The `Add-Type` check: executed, CI 45572032454
   (it chose `windows-x64`). The fallback: source-checked (`getty-bun.ps1:583-600`), a
-  local run with a fixture probe, not in CI. A CPU without AVX2: not checked.
+  local run with pwsh 7 on Linux and a fixture probe, not in CI. A CPU without AVX2:
+  not checked.
 - Fast path: the first slot that exists of `windows-x64`, then `windows-x64-baseline`,
   without CPU detection; a mismatching `windows-x64` slot fails closed and is never
   skipped. A profile moved to a CPU without AVX2 keeps its `windows-x64` slot (README).

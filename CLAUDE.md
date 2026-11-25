@@ -1,9 +1,12 @@
-# getty-bun
+# agent-bun-runtime
 
-Getty's Bun runtime for agent plugins: the bootstrap that installs an exact, verified Bun
-per user (`bootstrap/`) and the SDK `@getty/bun-runtime` that plugins run on. Every Getty
-plugin for Claude Code, Codex and Hermes ends up here: starter, our Bun, TypeScript.
-Coordinated from the hub `~/dev/agent-developer`.
+Getty's Bun runtime for agent plugins: the bootstrap that installs an exact, verified
+Bun per user (`bootstrap/`) and the SDK `@getty/agent-bun-runtime` that plugins run on.
+Every Getty plugin for Claude Code, Codex and Hermes ends up here: starter, our Bun,
+TypeScript. Coordinated from the hub `~/dev/agent-developer`. The repository is
+`Getty/agent-bun-runtime`; `getty-bun` stays the runtime's short name: the starters, the
+store, `GETTY_BUN_*` and the `getty-bun-*` roles and skills
+([ADR 0008](docs/adr/0008-repository-and-package-name.md)).
 
 ## Repository language
 

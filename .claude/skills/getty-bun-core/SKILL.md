@@ -1,6 +1,6 @@
 ---
 name: getty-bun-core
-description: Use when changing getty-bun - the bootstrap starters under bootstrap/, the @getty/bun-runtime SDK, tests, CI or the plan.
+description: Use when changing agent-bun-runtime - the bootstrap starters under bootstrap/, the @getty/agent-bun-runtime SDK, tests, CI or the plan.
 ---
 
 # getty-bun core
@@ -12,7 +12,7 @@ you are in and implement only that phase's gate and the MVP column; decisions ar
 | Path | Product | Runs before Bun exists? |
 |---|---|---|
 | `bootstrap/` | `getty-bun.sh`, `getty-bun.ps1`, `versions.json`, pin render, scenario suite | **Yes**: details in skill `getty-bun-bootstrap` |
-| repo root (`src/`, `package.json`, `bun.lock`) | `@getty/bun-runtime` | No: runs on the pinned Bun |
+| repo root (`src/`, `package.json`, `bun.lock`) | `@getty/agent-bun-runtime` | No: runs on the pinned Bun |
 
 ## Rules for both
 

@@ -1,4 +1,4 @@
-# getty-bun: plan
+# agent-bun-runtime: plan
 
 Status: adapted from the handoff on 2026-11-25. Phase 1 (the bootstrap starters in
 `bootstrap/`) is complete: merged into `main` at `262bc95` (PR 1), gate green in CI run
@@ -16,7 +16,7 @@ host hook / bin entry
   -> starter: getty-bun.sh (Linux, macOS)       no Bun, no Node, no Python needed
               getty-bun.ps1 (Windows, PowerShell 5.1 or 7)
   -> absolute Bun from <GETTY_HOME>/runtimes/bun/<version>/<target>/bin/bun[.exe]
-  -> the plugin's bundled TypeScript entry, built on @getty/bun-runtime
+  -> the plugin's bundled TypeScript entry, built on @getty/agent-bun-runtime
 ```
 
 No Python, Perl or Node in a plugin. One concept for all hooks and binaries.
@@ -30,7 +30,7 @@ asks for it.
 | Part | Where it lives | What it is |
 |---|---|---|
 | Bootstrap | `bootstrap/` here; delivered as the skilletor template `getty-bun-install` in Getty/skills | The two starters, the version table and the pin render |
-| `@getty/bun-runtime` | repo root (this package) | The handoff's SDK, cut to the MVP: context, Codex codec, effects, `main()` |
+| `@getty/agent-bun-runtime` | repo root (this package) | The handoff's SDK, cut to the MVP: context, Codex codec, effects, `main()` |
 | Consumer 1: briefing | `~/dev/briefing` | Codex only: preloads declared skills into a subagent at `SubagentStart` |
 | Consumer 2: skilletor | `~/dev/skilletor` | Already ~10k lines of TypeScript under Node; moves to getty-bun |
 
@@ -39,10 +39,10 @@ asks for it.
 1. **The starter installs, on demand** ([ADR 0002](adr/0002-install-on-demand.md); exit
    codes and hook timeout: [ADR 0007](adr/0007-starter-rules-after-phase-1.md)).
    Every starter call ensures the pinned Bun before it runs the entry: missing means
-   install under the OS lock, present means a fast local check. After a plugin install or
-   update the first hook (normally `SessionStart`) installs; concurrent hooks wait,
-   bounded, on the same lock. `@getty/bun-runtime` never installs anything. Contract v0.2
-   in `getty-bun-integration` (v0.1 said hooks only point at setup).
+   install under the OS lock, present means a fast local check. After a plugin install
+   or update the first hook (normally `SessionStart`) installs; concurrent hooks wait,
+   bounded, on the same lock. `@getty/agent-bun-runtime` never installs anything.
+   Contract v0.2 in `getty-bun-integration` (v0.1 said hooks only point at setup).
 2. **The provider is a skilletor template** ([ADR 0001](adr/0001-layout-and-delivery.md)).
    Each consumer renders `getty-bun-install` with its own `vars.bun_version`; the
    template holds the reviewed version table. The render writes one pin block (version
@@ -266,8 +266,15 @@ to another hook file is open.
 
 - Bun pin: 1.4.5 (latest stable, 2026-11-19), confirmed by the owner on 2026-11-25
   ([ADR 0005](adr/0005-bun-pin-and-version-table.md)).
-- Distribution of `@getty/bun-runtime`: npm, public, Artistic-2.0
+- Distribution of `@getty/agent-bun-runtime`: npm, public, Artistic-2.0
   ([ADR 0006](adr/0006-npm-distribution.md)). The org `getty` exists with the user
-  `getty` as owner; the name was free on 2026-11-25. First release by hand after
-  review and the owner's go, then trusted publishing from GitHub Actions with
-  provenance, no long-lived token. Until the first release consumers pin a git commit.
+  `getty` as owner, so the scope is the owner's; the package's earlier name was free
+  on 2026-11-25, the current one was not looked up on the registry (not checked). First
+  release by hand after review and the owner's go, then trusted publishing from GitHub
+  Actions with provenance, no long-lived token. Until the first release consumers pin a
+  git commit.
+- Names ([ADR 0008](adr/0008-repository-and-package-name.md), 2026-11-25): repository
+  `Getty/agent-bun-runtime`, checkout `~/dev/agent-bun-runtime`, package
+  `@getty/agent-bun-runtime` (not published yet). `getty-bun` stays the short name of
+  the runtime: the starters, `GETTY_HOME`, `GETTY_BUN_*`, the store and the
+  `getty-bun-*` roles and skills.

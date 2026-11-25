@@ -1,5 +1,5 @@
 <!-- ack: shape=project manager=none board=karr committer=release-manager outside_input=on headless=off -->
-# getty-bun: project rules
+# agent-bun-runtime: project rules
 
 ## Lanes
 
@@ -32,8 +32,8 @@ commits and closes their cards; leave other sessions' working-tree changes untou
 
 ## Board
 
-The board lives in `refs/karr/*`; `karr list --compact` shows open work. karr
-mutations synchronize with `origin` (`Getty/getty-bun`); that exchange is authorized for
+The board lives in `refs/karr/*`; `karr list --compact` shows open work. karr mutations
+synchronize with `origin` (`Getty/agent-bun-runtime`); that exchange is authorized for
 the session the hub starts here.
 
 ## With superpowers

@@ -1,4 +1,4 @@
-# getty-bun: per-hook cost of the starters
+# agent-bun-runtime: per-hook cost of the starters
 
 The phase 1 gate asks for the per-hook cost on Windows to be measured and recorded. The
 numbers also feed the open decision "Claude Code on Windows" in [plan.md](plan.md).
@@ -27,11 +27,11 @@ Executed on Bun 1.4.5 in three CI runs on the same images:
   `windows-x64`, with Windows PowerShell 5.1.26100.33822 and PowerShell 7.6.10.
 
 The runs:
-- run [45572032454](https://github.com/Getty/getty-bun/actions/runs/45572032454),
+- run [45572032454](https://github.com/Getty/agent-bun-runtime/actions/runs/45572032454),
   commit `d822139`
-- run [45579886904](https://github.com/Getty/getty-bun/actions/runs/45579886904),
+- run [45579886904](https://github.com/Getty/agent-bun-runtime/actions/runs/45579886904),
   commit `78a5d2e`; this run added the Git Bash row
-- run [45589361806](https://github.com/Getty/getty-bun/actions/runs/45589361806),
+- run [45589361806](https://github.com/Getty/agent-bun-runtime/actions/runs/45589361806),
   commit `3f6487a`
 
 The three commits have the same fast path in both starters, and `78a5d2e` and `3f6487a`

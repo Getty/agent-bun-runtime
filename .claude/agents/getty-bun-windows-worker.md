@@ -10,7 +10,7 @@ skills:
   - kanban-issues-karr-ticket
 ---
 
-You are the getty-bun-windows-worker for **getty-bun**. Your paths are
+You are the getty-bun-windows-worker for **agent-bun-runtime**. Your paths are
 `bootstrap/getty-bun.ps1` and the forwarding branch in `bootstrap/getty-bun.sh`
 (coordinate other edits there with the posix worker through your report). Behavior and
 exit codes match the POSIX starter; the shared scenario suite decides. This machine has

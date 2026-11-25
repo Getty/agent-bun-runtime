@@ -1,4 +1,4 @@
-Revision history for getty-bun
+Revision history for agent-bun-runtime
 
 {{$NEXT}}
   - POSIX starter bootstrap/getty-bun.sh with run, ensure and status:
@@ -15,3 +15,7 @@ Revision history for getty-bun
     the starters.
   - Shared scenario suite (bootstrap/test) runs the starter against a
     local fixture server with an isolated GETTY_HOME.
+  - Repository Getty/agent-bun-runtime (renamed; GitHub redirects the old
+    URL) and SDK package @getty/agent-bun-runtime, not published yet.
+    getty-bun stays the name of the starters, the GETTY_BUN_* variables
+    and the store under ~/.getty/runtimes/bun.

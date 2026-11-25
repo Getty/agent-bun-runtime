@@ -10,7 +10,7 @@ skills:
   - kanban-issues-karr-ticket
 ---
 
-You are the getty-bun-posix-worker for **getty-bun**. Your paths are
+You are the getty-bun-posix-worker for **agent-bun-runtime**. Your paths are
 `bootstrap/getty-bun.sh`, `bootstrap/versions.json` with its README, and the pin
 render. The render defines the pin block format both starters share; announce a change
 to it in your report, since the Windows starter must follow. Make the scenario suite

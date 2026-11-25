@@ -1,6 +1,7 @@
 # 0006: npm distribution of @getty/bun-runtime
 
-Status: accepted, 2026-11-25 (owner: npm org `getty`, Artistic-2.0).
+Status: accepted, 2026-11-25 (owner: npm org `getty`, Artistic-2.0); package name
+superseded by [0008](0008-repository-and-package-name.md).
 
 ## Decision
 
