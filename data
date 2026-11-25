@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-25T04:44:35Z
+depends_on:
+- 3
+id: 5
+priority: low
+status: backlog
+tags:
+- phase-5
+title: 'Phase 5/6: grow on demand, then release and upgrade'
+updated: 2026-11-25T05:15:35Z
+---
+
+Only when a consumer needs it: Hermes shell-hook codec; state backend; MCP companion; consumer dependency install (bun.lock check, bun install --frozen-lockfile under a consumer lock, binding) for a consumer that cannot bundle; repair, retention, rollback. Then handoff phase 6 release and upgrade acceptance.
