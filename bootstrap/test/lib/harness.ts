@@ -350,17 +350,80 @@ export interface RunResult {
   timedOut: boolean;
 }
 
+/**
+ * End a process this test spawned. On Windows the whole tree goes (`taskkill /T /F /PID`):
+ * a native child can outlive a killed bash.exe and hold files, which made sandbox cleanup
+ * fail with EBUSY (CI run 45579886904).
+ *
+ * taskkill runs only while Bun still holds the process handle (exitCode and signalCode both
+ * null): Bun 1.4.5 closes the libuv handle inside its exit callback, before it records the
+ * exit status (source-checked, src/spawn/process.rs ~611-623 at bun-v1.4.5), so after an
+ * observed exit a bare PID may already belong to someone else. taskkill is called by absolute
+ * path and its exit code is logged. A job object (card k13) is the robust fix. POSIX keeps the
+ * plain kill.
+ */
+export function killTree(proc: {
+  pid: number;
+  kill: () => void;
+  exitCode: number | null; // required: a caller passing only {pid, kill} must not count as alive
+  signalCode: string | null;
+}): void {
+  const alive = proc.exitCode === null && proc.signalCode === null;
+  if (IS_WIN && alive) {
+    try {
+      const root = process.env.SystemRoot ?? process.env.SYSTEMROOT ?? "C:\\Windows";
+      const r = Bun.spawnSync({
+        cmd: [join(root, "System32", "taskkill.exe"), "/T", "/F", "/PID", String(proc.pid)],
+        stdout: "ignore",
+        stderr: "ignore",
+      });
+      console.warn(`[killTree] taskkill /T /F /PID ${proc.pid}: exit ${r.exitCode}`);
+    } catch (e) {
+      console.warn(`[killTree] taskkill could not run: ${e}`);
+    }
+  }
+  try {
+    proc.kill();
+  } catch {}
+}
+
 export async function run(
   cmd: string[],
-  o: { env: Record<string, string>; cwd?: string; stdin?: Uint8Array | string; timeoutMs?: number },
+  o: {
+    env: Record<string, string>;
+    cwd?: string;
+    stdin?: Uint8Array | string;
+    /** stdin is a pipe that is closed at once (not the null device, not a buffer) */
+    closePipe?: boolean;
+    /** Bun.spawn windowsHide: no window, but the child still gets a console (CREATE_NO_WINDOW) */
+    windowsHide?: boolean;
+    /** Bun.spawn detached: on Windows DETACHED_PROCESS, no console at all. Exit reporting is
+     * source-checked: libuv process.c:1175-1177 registers the exit wait for every child (Windows
+     * reviewer, Bun 1.4.5 and oven-sh/libuv@8023581); not executed. */
+    detached?: boolean;
+    timeoutMs?: number;
+  },
 ): Promise<RunResult> {
   const t0 = performance.now();
-  const stdin = o.stdin === undefined ? "ignore" : typeof o.stdin === "string" ? Buffer.from(o.stdin) : Buffer.from(o.stdin);
-  const proc = Bun.spawn({ cmd, env: o.env, cwd: o.cwd, stdin, stdout: "pipe", stderr: "pipe" });
+  const stdin = o.closePipe ? "pipe" : o.stdin === undefined ? "ignore" : typeof o.stdin === "string" ? Buffer.from(o.stdin) : Buffer.from(o.stdin);
+  // windowsHide and detached are handled in Bun 1.4.5's native spawn, js_bun_spawn_bindings.rs
+  // :716-722 (windowsHide) and :668-670 (detached): source-checked by the Windows reviewer. Their
+  // Windows effects (CREATE_NO_WINDOW, DETACHED_PROCESS) are not executed here.
+  const proc = Bun.spawn({
+    cmd,
+    env: o.env,
+    cwd: o.cwd,
+    stdin,
+    stdout: "pipe",
+    stderr: "pipe",
+    ...(o.windowsHide ? ({ windowsHide: true } as object) : {}),
+    ...(o.detached ? { detached: true } : {}),
+  });
+  if (o.closePipe) (proc.stdin as { end(): void }).end();
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
-    proc.kill(); // only the process this call started
+    killTree(proc); // only the process this call started (and its children on Windows)
   }, o.timeoutMs ?? 90_000);
   const outP = new Response(proc.stdout).arrayBuffer();
   const errP = new Response(proc.stderr).arrayBuffer();
@@ -568,7 +631,7 @@ export async function holdLock(file: string, seconds = 60): Promise<LockHolder> 
     if (done) break;
   }
   if (!pid) {
-    proc.kill();
+    killTree(proc);
     throw new Error(`lock holder did not report the lock: ${JSON.stringify(buf)}`);
   }
   let released = false;
@@ -576,10 +639,14 @@ export async function holdLock(file: string, seconds = 60): Promise<LockHolder> 
     async release() {
       if (released) return;
       released = true;
-      try {
-        process.kill(pid); // the holder this helper started
-      } catch {}
-      proc.kill();
+      // Only while Bun still holds the handle: on Windows this PID is the holder's own $PID,
+      // equal to proc.pid, and may be reused after an observed exit (see killTree).
+      if (proc.exitCode === null && proc.signalCode === null) {
+        try {
+          process.kill(pid); // the holder this helper started
+        } catch {}
+      }
+      killTree(proc);
       await proc.exited;
     },
   };
@@ -602,6 +669,18 @@ export async function tryLock(file: string): Promise<{ code: number | null; err:
     : ["flock", "-n", file, "true"];
   const r = await run(cmd, { env: cleanProcessEnv(), timeoutMs: 30_000 });
   return { code: r.code, err: r.err };
+}
+
+/**
+ * Git for Windows' two bash executables: `<git>\bin\bash.exe` is a native wrapper (what a
+ * user or host finds first), `<git>\usr\bin\bash.exe` is the MSYS bash it starts.
+ */
+export function gitBashPair(): { wrapper: string; direct: string } | null {
+  const wrapper = findGitBashExe();
+  if (!wrapper) return null;
+  const root = dirname(dirname(wrapper));
+  const direct = join(root, "usr", "bin", "bash.exe");
+  return existsSync(direct) ? { wrapper, direct } : null;
 }
 
 /** Git for Windows' bash.exe (never the WSL launcher in System32); null when absent. */

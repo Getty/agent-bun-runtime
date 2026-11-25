@@ -502,9 +502,31 @@ caller sees exit 126 and the shell's own error line, not a `getty-bun: ` line. (
 checked.)
 
 **Limit: exit codes through Git Bash.** The caller gets PowerShell's exit code as the
-MSYS runtime passes it on, which need not be all 32 bits. TODO (k9): what an entry's
-code above 255 and an NTSTATUS such as `0xC0000005` become there, from the scenario
-suite's measurement.
+MSYS runtime passes it on. Exit codes 0, 1, 2, 7 and 42 come back unchanged (executed,
+CI run 45579886904, commit `78a5d2e`, both legs, same image and versions as above, MSYS
+runtime 3.6.10-5a1665c8), which shows each code modulo 256 only, since the harness sees
+only the low byte; the 32-bit observer is the TODO below. Codes above 255 are not shown:
+the suite observes them through `Bun.spawn`, whose exit code on Windows is only the low
+byte of the real one (source-checked, Bun 1.4.5 `src/spawn/process.rs`), so its 0 for
+256 and 5 for `0xC0000005` say nothing about the entry, the starter or Git Bash.
+TODO (k9): the 32-bit result from a PowerShell `$LASTEXITCODE` observer. The forwarding
+runs Windows PowerShell 5.1 when `$SYSTEMROOT` has it (source-checked, `getty-bun.sh`
+`forward_to_powershell`; executed but indirect: in the pwsh scenario job 139086960775
+of CI 45579886904 the orphaned process left by the forwarded call is named
+`powershell`, not `pwsh`). What the NTSTATUS of a native crash becomes through Git
+Bash: not measured.
+
+**Limit: Git Bash with a NUL stdin.** Git for Windows' `bin\bash.exe` started with a NUL
+stdin while a console is present: an entry that reads stdin may block until the host's
+timeout (seen in CI 45579886904 under a shared console; cause not confirmed, see the
+MSYS2 and wrapper analysis on k9). After such a hang `bun.exe` may stay behind
+(executed: the runner terminated an orphaned bash, powershell and bun at the end of
+each of the three Windows scenario jobs of CI 45579886904; k13). (The hang: executed,
+CI 45579886904; its cause: not checked.) Hook input on a pipe is not affected as far as
+shown: a pipe with data through `bin\bash.exe` passes (executed, CI 45579886904); a pipe
+closed at once through the wrapper: not checked yet, it runs in the next CI run. That
+hosts pass hook input on a pipe is measured for Claude Code by the windows-developer
+repository (`docs/hook-start-windows.md` there); for Codex: not measured.
 
 **Limit: MSYS path conversion.** The forwarding sets `MSYS_NO_PATHCONV=1` and
 `MSYS2_ARG_CONV_EXCL='*'` so that the MSYS runtime does not rewrite arguments that look
