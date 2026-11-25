@@ -1,0 +1,39 @@
+---
+class: standard
+completed: 2026-11-25T11:30:11Z
+created: 2026-11-25T04:44:33Z
+depends_on:
+- 1
+- 6
+- 7
+- 8
+- 9
+- 10
+id: 2
+priority: high
+started: 2026-11-25T05:19:06Z
+status: done
+tags:
+- phase-1
+- windows
+title: 'Phase 1: bootstrap MVP for Linux and Windows'
+updated: 2026-11-25T11:30:11Z
+---
+
+bootstrap/getty-bun.sh and bootstrap/getty-bun.ps1 (PowerShell 5.1 and 7) with run, ensure, status; bootstrap/versions.json plus pin render (one pin block in both starters); MVP targets linux-x64, linux-x64-baseline, linux-aarch64, windows-x64, windows-x64-baseline; flock / FileShare.None across download, verify, publish; staging, atomic publish, receipt; bounded lock wait; Git Bash forwarding to ps1. No consumer dependency install (ADR 0003). One shared bun:test scenario suite against both starters; CI ubuntu-latest, ubuntu-24.04-arm, windows-latest (powershell and pwsh), shellcheck, one real-download job. Gate and scenarios: docs/plan.md phase 1. Also record the per-hook cost on Windows (PowerShell start plus Bun start).
+
+Started by the phase 1 session (brief 2026-11-25-phase-1-bootstrap in the hub). Branch phase-1-bootstrap; lane sub-cards follow.
+
+Sub-cards: k6 table and pin render, k7 sh starter, k8 scenario suite, k9 ps1 starter and Git Bash forwarding, k10 CI. Review and commits stay on k2.
+
+Committed 174fc8f on phase-1-bootstrap, pushed; draft PR https://github.com/Getty/getty-bun/pull/1
+
+Second branch commit a2c12da on phase-1-bootstrap, pushed (Windows starter, round-two fixes)
+
+Third branch commit d822139 on phase-1-bootstrap, pushed (Git Bash forwarding, Windows review fixes)
+
+Fourth branch commit 78a5d2e on phase-1-bootstrap, pushed (suite broadening, Windows file mirror, hook cost)
+
+Fifth branch commit 3f6487a on phase-1-bootstrap, pushed (Git Bash stdin probes, bounded Windows timeouts, hook cost)
+
+Phase 1 gate holds: CI 45603412444 on 262bc95 green on all 10 jobs, shellcheck clean, per-hook cost in docs/hook-cost.md. Landed on main by fast-forward (PR 1). Report to the hub.
