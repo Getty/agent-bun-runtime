@@ -34,7 +34,11 @@ commits and closes their cards; leave other sessions' working-tree changes untou
 
 The board lives in `refs/karr/*`; `karr list --compact` shows open work. karr mutations
 synchronize with `origin` (`Getty/agent-bun-runtime`); that exchange is authorized for
-the session the hub starts here.
+the session the hub starts here. A card another holder has claimed is not moved, not even
+after the claim has expired; the report names it instead. The main session releases an
+expired claim of a finished lane (`karr edit <id> --release`) once it has checked that
+the holder is done and no longer running; only then does the release manager claim and
+close the card.
 
 ## With superpowers
 
@@ -45,7 +49,13 @@ diff; the release manager makes an authorized commit afterwards.
 ## Hazards
 
 - A test that installs Bun uses a temporary `HOME`; never the user's `~/.getty`.
-- Killing or lock tests use fixture processes only, never an unrelated user process.
+- Killing and lock tests use fixture processes only. A test or probe kills only a PID it
+  started and recorded: no `pkill`, no `killall`, no kill by pattern (`pgrep -f`,
+  `Get-Process -Name … | Stop-Process`).
+- Whatever a task creates under `$TMPDIR` or `/tmp` (Windows: `$env:TEMP`) carries a
+  prefix of its own and is removed before the report; the report names what stays and
+  why. Each test file cleans up in its own `afterEach`/`afterAll`, not in a hook a shared
+  helper registers on import.
 - Downloads in tests hit the real release URL only in the dedicated installer job; unit
   tests use a local fixture archive.
 - Publishing to npm needs the owner's go. Pushing work branches to `origin` for CI is
