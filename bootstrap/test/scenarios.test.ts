@@ -9,6 +9,7 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { inflateRawSync } from "node:zlib";
 import { archiveInfo, loadRealTable } from "./lib/table";
 import { fileEntry, readZip, writeZip } from "./lib/zip";
@@ -24,6 +25,8 @@ import {
   findGitBashExe,
   hostTargets,
   samePath,
+  pathWithoutBun,
+  useMirror,
   holdLock,
   install,
   listDir,
@@ -379,11 +382,58 @@ describe(`scenario 8: run passes stdin, stdout and the exit code through [${STAR
     expect(Buffer.from(r.stdout).equals(Buffer.from(big))).toBe(true);
   });
 
-  test("an empty stdin ends at once", async () => {
+  test("empty stdin, null device: the entry sees end of input at once", async () => {
+    const { sb } = await ready();
+    const r = await starter(sb, ["run", "entries/echo.ts", "0"], { timeoutMs: 60_000 }); // no stdin: Bun.spawn "ignore"
+    expectExit(r, 0);
+    expect(r.stdout.length).toBe(0);
+  });
+
+  test("empty stdin, an empty buffer (on Linux Bun hands the child /dev/null, so this equals the first case; on Windows not checked)", async () => {
     const { sb } = await ready();
     const r = await starter(sb, ["run", "entries/echo.ts", "0"], { stdin: new Uint8Array(), timeoutMs: 60_000 });
     expectExit(r, 0);
     expect(r.stdout.length).toBe(0);
+  });
+
+  test("empty stdin, a pipe the host closes at once", async () => {
+    const { sb } = await ready();
+    const proc = Bun.spawn({
+      cmd: starterCmd(sb.root, ["run", "entries/echo.ts", "0"]),
+      env: sb.env,
+      cwd: sb.cwd,
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    track(() => void proc.kill()); // only the process this test started
+    const outP = new Response(proc.stdout).arrayBuffer();
+    const errP = new Response(proc.stderr).text();
+    proc.stdin.end();
+    const code = await Promise.race([proc.exited, Bun.sleep(60_000).then(() => "timeout" as const)]);
+    if (code !== 0) {
+      proc.kill(); // only the process this test started
+      const err = await Promise.race([errP, Bun.sleep(3000).then(() => "(stderr not available)")]);
+      throw new Error(`expected exit 0, got ${code}; stderr: ${JSON.stringify(err)}`);
+    }
+    expect((await outP).byteLength).toBe(0);
+    expect(await errP).toBe("");
+  });
+
+  test.skipIf(!IS_WIN)("diagnostic (data only, Windows): the slot's Bun alone, empty Bun.write to a piped stdout", async () => {
+    const { sb } = await ready();
+    const st = await status(sb);
+    const r = await run([slotBun(st.slot), "--no-install", join(sb.root, "entries", "empty-write.ts")], {
+      env: sb.env,
+      cwd: sb.cwd,
+      timeoutMs: 60_000,
+    });
+    // recorded, never asserted: a later Bun may fix it. Bun alone runs on a pipe Bun itself
+    // creates, which is not the kind of pipe a starter hands it: the second run goes
+    // through the starter. Claims about the cause are NOT CHECKED; SDK side: card k11.
+    console.log(`[data] bun.exe without a starter, empty Bun.write to a stdout pipe: exit ${r.code}, timedOut ${r.timedOut}, stdout ${JSON.stringify(r.out)}, stderr ${JSON.stringify(r.err.slice(0, 300))}`);
+    const viaStarter = await starter(sb, ["run", "entries/empty-write.ts"], { timeoutMs: 60_000 });
+    console.log(`[data] the same empty write through the ${STARTER} starter: exit ${viaStarter.code}, timedOut ${viaStarter.timedOut}, stdout ${JSON.stringify(viaStarter.out)}, stderr ${JSON.stringify(viaStarter.err.slice(0, 300))}`);
   });
 
   test("UTF-8 umlauts on stdout are byte for byte", async () => {
@@ -404,7 +454,7 @@ describe(`scenario 8: run passes stdin, stdout and the exit code through [${STAR
 
   test("arguments after the entry arrive unchanged (spaces, quotes, trailing backslash, non-ASCII)", async () => {
     const { sb } = await ready();
-    const args = ["plain", "with space", 'say "hi"', "trailing\\", "dir with space\\", "äß日"];
+    const args = ["plain", "with space", 'say "hi"', "trailing\\", "dir with space\\", "äß日", ""];
     const r = await starter(sb, ["run", "entries/info.ts", ...args]);
     expectExit(r, 0);
     expect(JSON.parse(r.out).argv).toEqual(args);
@@ -439,10 +489,12 @@ describe(`scenario 8: run passes stdin, stdout and the exit code through [${STAR
     proc.stdin.end(); // only now
     if (stillOpen) await proc.exited; // let the process end; the assertion below reports it
     const out = Buffer.from(await outP);
-    expect(stillOpen).toBe(false); // the starter waited on the open stdin
-    expect(code).toBe(5);
+    const err8b = await errP;
+    if (stillOpen || code !== 5) {
+      throw new Error(`expected exit 5 within 10 s, got ${code}${stillOpen ? " (the starter waited on the open stdin)" : ""}; stderr: ${JSON.stringify(err8b)}`);
+    }
     expect(out.equals(Buffer.from('reply:{"event":"x"}:ü\n'))).toBe(true);
-    expect(await errP).toBe("");
+    expect(err8b).toBe("");
     expect(ms).toBeLessThan(10_000);
   });
 
@@ -558,6 +610,137 @@ describe(`scenario 11: Git Bash forwarding shares slot and lock with PowerShell 
     expect(failureLine(blocked)).toContain("getty-bun: ");
     expect(await exists(st2.slot)).toBe(false);
     expect(await stagingLeft(sb2)).toEqual([]);
+  });
+
+  // Git Bash = Git for Windows' bash.exe running bootstrap/getty-bun.sh, which forwards.
+  const viaBash = (
+    sb: Sandbox,
+    args: string[],
+    o: { stdin?: Uint8Array | string; env?: Record<string, string>; timeoutMs?: number } = {},
+  ) =>
+    run([bashExe!, join(sb.root, "bootstrap", "getty-bun.sh").replace(/\\/g, "/"), ...args], {
+      env: { ...sb.env, ...(o.env ?? {}) },
+      cwd: sb.cwd,
+      stdin: o.stdin,
+      timeoutMs: o.timeoutMs ?? 120_000,
+    });
+  const cygpath = async (flag: "-u" | "-w", p: string) => {
+    const r = await run([bashExe!, "-c", `cygpath ${flag} "$1"`, "_", p], { env: process.env as Record<string, string>, timeoutMs: 30_000 });
+    expectExit(r, 0);
+    return r.out.trim();
+  };
+
+  t(name + " [exit codes]", async () => {
+    const server = await realServer();
+    const sb = await sandbox({ mirror: server.url });
+    for (const code of [0, 1, 2, 7, 42]) {
+      const r = await viaBash(sb, ["run", "entries/echo.ts", String(code)], { stdin: "x" }); // the first call installs
+      expectExit(r, code);
+      expect(r.out).toBe("x");
+    }
+    expect(server.archives()).toBe(1);
+    // recorded as data only: Cygwin probably keeps the low 8 bits
+    for (const code of [256, 3221225477]) {
+      const r = await viaBash(sb, ["run", "entries/echo.ts", String(code)], { stdin: "x" });
+      const direct = await starter(sb, ["run", "entries/echo.ts", String(code)], { stdin: "x" }); // the control: no Git Bash
+      console.log(`[data] exit code ${code}: the ${STARTER} starter directly returned ${direct.code} (timedOut ${direct.timedOut}, stderr ${JSON.stringify(direct.err)}); through Git Bash bash.exe returned ${r.code} (timedOut ${r.timedOut}, stderr ${JSON.stringify(r.err)})`);
+    }
+  });
+
+  t(name + " [GETTY_HOME in POSIX form]", async () => {
+    const server = await realServer();
+    const sb = await sandbox({ mirror: server.url });
+    const st = await install(sb); // PowerShell, native GETTY_HOME
+    const requests = server.total();
+    // two POSIX spellings of the same directory: what cygpath -u gives (probably Git's /tmp
+    // mount for a Temp path) and a hand-built /c/... form (lower-case drive, rest from the native path)
+    const viaCygpath = await cygpath("-u", sb.home);
+    const handBuilt = sb.home.replace(/^([A-Za-z]):/, (_m, d: string) => `/${d.toLowerCase()}`).replace(/\\/g, "/");
+    console.log(`[data] GETTY_HOME native ${sb.home}; cygpath -u ${viaCygpath}; hand-built ${handBuilt}`);
+    for (const posixHome of new Set([viaCygpath, handBuilt])) {
+      expect(posixHome.startsWith("/")).toBe(true);
+      const r = await viaBash(sb, ["status"], { env: { GETTY_HOME: posixHome } });
+      expectExit(r, 0);
+      const bst = JSON.parse(r.out);
+      expect(bst.state).toBe("ready");
+      const slot = bst.slot.startsWith("/") ? await cygpath("-w", bst.slot) : bst.slot;
+      expect(samePath(slot, st.slot)).toBe(true);
+      const ran = await viaBash(sb, ["run", "entries/info.ts"], { env: { GETTY_HOME: posixHome } });
+      expectExit(ran, 0);
+      expect(server.total()).toBe(requests); // no second install
+      expect(await publishedTargets(sb, REAL_VERSION)).toEqual([st.target]);
+    }
+  });
+
+  t(name + " [arguments]", async () => {
+    const server = await realServer();
+    const sb = await sandbox({ mirror: server.url });
+    // "/c/Users/x" and "/tmp/a b" look like POSIX paths: MSYS must not convert them
+    const args = ["with space", 'say "hi"', "trailing\\", "", "/c/Users/x", "/tmp/a b"];
+    const r = await viaBash(sb, ["run", "entries/info.ts", ...args]);
+    expectExit(r, 0);
+    expect(JSON.parse(r.out).argv).toEqual(args);
+  });
+
+  t(name + " [stdin]", async () => {
+    const server = await realServer();
+    const sb = await sandbox({ mirror: server.url });
+    const all = new Uint8Array(256).map((_, i) => i); // every byte value
+    const rAll = await viaBash(sb, ["run", "entries/echo.ts", "0"], { stdin: all });
+    expectExit(rAll, 0);
+    expect(Buffer.from(rAll.stdout).equals(Buffer.from(all))).toBe(true);
+    const rEmpty = await viaBash(sb, ["run", "entries/echo.ts", "0"], { stdin: new Uint8Array() });
+    expectExit(rEmpty, 0);
+    expect(rEmpty.stdout.length).toBe(0);
+  });
+
+  t(name + " [non-ASCII consumer root]", async () => {
+    const server = await realServer();
+    const sb = await sandbox({ mirror: server.url, rootName: "Pr\u00fcfung Wurzel \u00e4 \u65e5" });
+    const r = await viaBash(sb, ["run", "entries/echo.ts", "0"], { stdin: UMLAUTS });
+    expectExit(r, 0);
+    expect(r.out).toBe(UMLAUTS);
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+describe(`file:// mirror [${STARTER}]`, () => {
+  test("a file:// mirror that holds no archive fails with exit 1 and publishes nothing (the mirror is really used)", async () => {
+    const sb = await sandbox({ mirror: null });
+    const empty = join(sb.tmp, "empty mirror");
+    await mkdir(empty, { recursive: true });
+    useMirror(sb, pathToFileURL(empty).href);
+    const st = await status(sb);
+    const r = await starter(sb, ["ensure"]);
+    expectExit(r, 1);
+    expect(r.out).toBe("");
+    failureLine(r);
+    expect(await exists(st.slot)).toBe(false);
+    expect(await publishedTargets(sb, REAL_VERSION)).toEqual([]);
+    expect(await stagingLeft(sb)).toEqual([]);
+  });
+
+  // curl reads file:// URLs, wget does not: the sh starter prefers curl.
+  const noCurl = STARTER === "sh" && Bun.which("curl", { PATH: pathWithoutBun() }) === null;
+  if (noCurl) console.warn("[bootstrap-test] SKIP file:// mirror: only wget is on PATH, and wget cannot fetch file:// URLs");
+  const t = noCurl ? test.skip : test;
+  t(noCurl ? "file:// mirror (SKIPPED: only wget present)" : "GETTY_BUN_MIRROR as a file:// URL to a directory with a space and a non-ASCII name installs", async () => {
+    const sb = await sandbox({ mirror: null });
+    const mirrorDir = join(sb.tmp, "mirror dir \u00e4");
+    for (const t of hostTargets()) {
+      await mkdir(join(mirrorDir, `bun-v${REAL_VERSION}`), { recursive: true });
+      await Bun.write(join(mirrorDir, `bun-v${REAL_VERSION}`, `bun-${t}.zip`), await fixtureArchive(t));
+    }
+    useMirror(sb, pathToFileURL(mirrorDir).href);
+    const r = await starter(sb, ["ensure"]);
+    expectExit(r, 0);
+    expect(r.out).toBe("");
+    const st = await status(sb);
+    expect(st.state).toBe("ready");
+    expect(await stagingLeft(sb)).toEqual([]);
+    const ran = await starter(sb, ["run", "entries/info.ts"]);
+    expectExit(ran, 0);
+    expect(JSON.parse(ran.out).version).toBe(REAL_VERSION);
   });
 });
 

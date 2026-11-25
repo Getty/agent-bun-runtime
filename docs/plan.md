@@ -166,7 +166,9 @@ GitHub for real):
   shell form, which pays a PowerShell start (~720 ms) per hook. Options: a tiny native
   shim (like winlaunch, built reproducibly with zig, x64 only) that runs the bound Bun
   directly and calls `getty-bun.ps1` only to install, or the polyglot. Decide with the
-  per-hook cost measured in phase 1.
+  per-hook cost measured in phase 1 ([hook-cost.md](hook-cost.md): on the CI runner the
+  starter adds about 0.35 s over Bun; under Codex' PowerShell nesting a hook takes about
+  0.5–0.55 s in total).
 - **Codex re-trust on updates.** The Codex docs say a plugin update that changes a
   bundled script needs a new hook review, even when the hook definition stays the same.
   Measure in phase 3a what counts as a bundled script (the starter, the entry, both).

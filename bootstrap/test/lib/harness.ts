@@ -17,6 +17,9 @@ import {
 import { existsSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
+// Path comparison lives in lib/paths.ts: a module with no test hooks, so paths.test.ts can
+// import it without registering this file's afterEach (which must attach to scenarios.test.ts).
+export { canonPath, samePath } from "./paths";
 import { archiveInfo, loadRealTable, tableWith, type Table } from "./table";
 
 export const IS_WIN = process.platform === "win32";
@@ -192,7 +195,12 @@ export interface SandboxOptions {
 const ENTRY_ECHO = `// stdin to stdout byte for byte; exit code from argv
 const code = Number(process.argv[2] ?? 0);
 const input = new Uint8Array(await Bun.stdin.arrayBuffer());
-await Bun.write(Bun.stdout, input);
+// Bun 1.4.5 on Windows: Bun.write(Bun.stdout, <empty>) to a stdout pipe fails with
+// "EINVAL: invalid argument, ftruncate" (executed through the ps1's pipe, CI run
+// 45572032454). Whether that is Bun's own or the starter's pipe is NOT CHECKED: the
+// diagnostics in scenarios.test.ts record both. The SDK side is card k11. Until then an
+// empty input writes nothing.
+if (input.length > 0) await Bun.write(Bun.stdout, input);
 process.exit(code);
 `;
 const ENTRY_INFO = `// facts about the Bun that runs this entry
@@ -220,6 +228,14 @@ const line = buf.slice(0, buf.indexOf("\\n"));
 process.stdout.write("reply:" + line + ":\\u00fc\\n");
 process.exit(5);
 `;
+const ENTRY_EMPTYWRITE = `// diagnostic: does an empty Bun.write to a piped stdout fail on this Bun? exit code says
+try {
+  await Bun.write(Bun.stdout, new Uint8Array());
+} catch (e) {
+  process.stderr.write("empty write failed: " + e + "\\n");
+  process.exit(9);
+}
+`;
 const ENTRY_EMIT = `process.stdout.write(${JSON.stringify(UMLAUTS)});\n`;
 // the trivial hook entry of measure-hook.ts: JSON in, JSON out
 export const ENTRY_HOOK = `const input = JSON.parse(await Bun.stdin.text());
@@ -227,7 +243,7 @@ process.stdout.write(JSON.stringify({ ok: true, event: input.event ?? null }));
 `;
 
 export async function sandbox(opts: SandboxOptions = {}): Promise<Sandbox> {
-  const tmp = realpathSync.native(await mkdtemp(join(tmpdir(), "getty-bun-test-"))); // long names, not RUNNER~1
+  const tmp = realpathSync.native(await mkdtemp(join(tmpdir(), "getty-bun-test-"))); // long names; "RUNNER~1" 8.3 names on GitHub Windows runners are an assumption, not observed
   track(() => rmTree(tmp));
   const home = join(tmp, opts.homeName ?? "getty-home");
   const userHome = join(tmp, "user-home");
@@ -241,6 +257,7 @@ export async function sandbox(opts: SandboxOptions = {}): Promise<Sandbox> {
   await writeFile(join(root, "entries", "info.ts"), ENTRY_INFO);
   await writeFile(join(root, "entries", "emit.ts"), ENTRY_EMIT);
   await writeFile(join(root, "entries", "wait.ts"), ENTRY_WAIT);
+  await writeFile(join(root, "entries", "empty-write.ts"), ENTRY_EMPTYWRITE);
   await writeFile(join(root, "entries", "line.ts"), ENTRY_LINE);
   await writeFile(join(root, "entries", "hook.ts"), ENTRY_HOOK);
 
@@ -378,29 +395,6 @@ export function starterCmd(root: string, args: string[], kind: StarterKind = STA
   ];
 }
 
-/**
- * Compare two paths as the file system sees them: long names (not 8.3 short names),
- * canonical case, separators. A path that does not exist yet is resolved through its
- * nearest existing ancestor.
- */
-export function canonPath(p: string): string {
-  const tail: string[] = [];
-  let cur = p;
-  for (;;) {
-    try {
-      const real = realpathSync.native(cur);
-      const full = tail.length ? join(real, ...tail.reverse()) : real;
-      return IS_WIN ? full.replace(/\//g, "\\").toLowerCase() : full;
-    } catch {
-      const up = dirname(cur);
-      if (up === cur) return IS_WIN ? p.replace(/\//g, "\\").toLowerCase() : p;
-      tail.push(cur.slice(up.length).replace(/^[\\/]+/, ""));
-      cur = up;
-    }
-  }
-}
-export const samePath = (a: string, b: string) => canonPath(a) === canonPath(b);
-
 export interface StarterOptions {
   stdin?: Uint8Array | string;
   /** extra environment; a null value removes the variable */
@@ -419,9 +413,10 @@ export async function starter(sb: Sandbox, args: string[], o: StarterOptions = {
     if (v === null) delete env[k];
     else env[k] = v;
   }
-  // On Windows the PowerShell starter's default home comes from the user profile API, which
-  // does not follow a changed USERPROFILE: without GETTY_HOME a test would write to the
-  // real profile's .getty. Refuse to spawn.
+  // Claim (Windows reviewer, source-checked, not measured by this suite): the PowerShell
+  // starter's default home comes from the user profile API, which does not follow a changed
+  // USERPROFILE. Without GETTY_HOME a test could then write to the real profile's .getty,
+  // so refuse to spawn. Treated as true until a Windows run shows otherwise.
   if (IS_WIN && !env.GETTY_HOME) {
     throw new Error("refusing to run a starter on Windows without GETTY_HOME (it would touch the real ~/.getty)");
   }

@@ -319,10 +319,14 @@ function Save-Archive([string]$Url, [string]$Path, [int]$WindowSeconds = 60) {
     $file = $null
     $done = $false
     try {
+        # http(s) gives an HttpWebRequest, file:// a FileWebRequest without UserAgent and
+        # ReadWriteTimeout; the stall bound below applies to the stream of either.
         $request = [System.Net.WebRequest]::Create($Url)
-        $request.UserAgent = 'getty-bun'
         $request.Timeout = $windowMs
-        $request.ReadWriteTimeout = $windowMs
+        if ($request -is [System.Net.HttpWebRequest]) {
+            $request.UserAgent = 'getty-bun'
+            $request.ReadWriteTimeout = $windowMs
+        }
         $response = $request.GetResponse()
         $body = $response.GetResponseStream()
         $file = [System.IO.File]::Create($Path)
@@ -684,9 +688,10 @@ function Invoke-GettyBun([string]$ScriptPath, [string[]]$Argv) {
     $Argv = @($Argv)
     $command = ''
     if ($Argv.Count -gt 0) { $command = $Argv[0] }
-    $usage = 'usage: getty-bun.ps1 run <entry> [args...] | ensure | status'
+    # No file name: under Git Bash the user called getty-bun.sh, which forwards here.
+    $usage = 'usage: run <entry> [args...] | ensure | status'
     if ($command -ceq 'run') {
-        if ($Argv.Count -lt 2) { Fail 'usage: getty-bun.ps1 run <entry> [args...]' }
+        if ($Argv.Count -lt 2) { Fail 'usage: run <entry> [args...]' }
     } elseif ($command -ceq 'ensure' -or $command -ceq 'status') {
         if ($Argv.Count -ne 1) { Fail $usage }
     } else {

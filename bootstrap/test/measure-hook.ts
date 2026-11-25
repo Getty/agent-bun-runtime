@@ -19,6 +19,7 @@ import {
   realRoutes,
   status,
   starterCmd,
+  findGitBashExe,
 } from "./lib/harness";
 
 const n = Number(process.argv[2] ?? 10);
@@ -59,9 +60,11 @@ try {
     await timed("bare Bun (slot Bun, same entry, no starter)", [slotBun(st.slot), "--no-install", entry]),
     await timed((STARTER === "sh" ? "direct exec: sh starter `run` (fast path)" : `direct exec form: ${STARTER} -File starter \`run\` (fast path)`), starterCmd(sb.root, ["run", "entries/hook.ts"])),
   ];
-  // Codex runs commandWindows in its session shell, `powershell -NoProfile -Command <line>`
-  // (source-checked openai/codex 3f65e9f): two PowerShell starts per hook. This row is
-  // evidence for that, never a failure: exit codes, bytes and timeouts are recorded as data.
+  // Observed rows are evidence, never failures: exit codes, bytes and timeouts are data.
+  //  - Codex nesting: Codex runs commandWindows in its session shell,
+  //    `powershell -NoProfile -Command <line>` (source-checked openai/codex 3f65e9f), so two
+  //    PowerShell starts per hook.
+  //  - Git Bash: bash.exe -> getty-bun.sh -> PowerShell -> Bun (the sh starter forwards).
   interface Seen {
     ms: number;
     code: number | null;
@@ -69,35 +72,60 @@ try {
     out: string;
     err: string;
   }
-  const nested: Seen[] = [];
+  interface Observed {
+    label: string;
+    seen: Seen[];
+  }
+  const observed: Observed[] = [];
   let directOut = "";
-  if (STARTER !== "sh") {
-    const line = starterCmd(sb.root, ["run", "entries/hook.ts"])
-      .map((a) => (/[\s"]/.test(a) ? `"${a}"` : a))
-      .join(" ");
-    const direct = await run(starterCmd(sb.root, ["run", "entries/hook.ts"]), {
-      env: sb.env, cwd: sb.cwd, stdin, timeoutMs: 60_000,
-    });
-    directOut = direct.out;
+
+  async function observe(label: string, cmd: string[]): Promise<void> {
+    const seen: Seen[] = [];
     for (let i = 0; i < n; i++) {
       try {
-        const r = await run(["powershell", "-NoProfile", "-Command", line], {
-          env: sb.env, cwd: sb.cwd, stdin, timeoutMs: 30_000,
-        });
-        nested.push({ ms: r.ms, code: r.code, timedOut: r.timedOut, out: r.out, err: r.err });
-        if (r.timedOut && nested.filter((x) => x.timedOut).length >= 2) break; // enough evidence
+        const r = await run(cmd, { env: sb.env, cwd: sb.cwd, stdin, timeoutMs: 30_000 });
+        seen.push({ ms: r.ms, code: r.code, timedOut: r.timedOut, out: r.out, err: r.err });
+        if (r.timedOut && seen.filter((x) => x.timedOut).length >= 2) break; // enough evidence
       } catch (e) {
-        nested.push({ ms: 0, code: null, timedOut: false, out: "", err: `spawn failed: ${e}` });
+        seen.push({ ms: 0, code: null, timedOut: false, out: "", err: `spawn failed: ${e}` });
         break;
       }
     }
-    const done = nested.filter((x) => !x.timedOut && x.code !== null).map((x) => x.ms).sort((a, b) => a - b);
+    observed.push({ label, seen });
+    // the main table counts only runs that exited 0
+    const done = seen.filter((x) => !x.timedOut && x.code === 0).map((x) => x.ms).sort((a, b) => a - b);
     rows.push({
-      label: `Codex nesting: powershell -NoProfile -Command "<${STARTER} -File starter run>" (completed runs only)`,
+      label: `${label} (${done.length} of ${seen.length} runs exited 0; those only)`,
       median: done.length ? done[done.length >> 1]! : NaN,
       min: done.length ? done[0]! : NaN,
       max: done.length ? done[done.length - 1]! : NaN,
     });
+  }
+
+  if (STARTER !== "sh") {
+    directOut = (
+      await run(starterCmd(sb.root, ["run", "entries/hook.ts"]), { env: sb.env, cwd: sb.cwd, stdin, timeoutMs: 60_000 })
+    ).out;
+    const line = starterCmd(sb.root, ["run", "entries/hook.ts"])
+      .map((a) => (/[\s"]/.test(a) ? `"${a}"` : a))
+      .join(" ");
+    await observe(`Codex nesting: powershell -NoProfile -Command "<${STARTER} -File starter run>"`, [
+      "powershell",
+      "-NoProfile",
+      "-Command",
+      line,
+    ]);
+    const bash = findGitBashExe();
+    if (bash) {
+      await observe("Git Bash -> getty-bun.sh -> Windows PowerShell 5.1 -> Bun (the forwarding prefers 5.1 on both legs: Windows reviewer, source-checked)", [
+        bash,
+        join(sb.root, "bootstrap", "getty-bun.sh").replace(/\\/g, "/"),
+        "run",
+        "entries/hook.ts",
+      ]);
+    } else {
+      console.warn("[measure-hook] no Git Bash found: the Git Bash row is left out");
+    }
   }
   const f = (x: number) => (Number.isNaN(x) ? "n/a" : x.toFixed(0));
   console.log(`### Per-hook cost: ${STARTER} on ${process.platform}/${process.arch}, N = ${n}`);
@@ -107,21 +135,20 @@ try {
   for (const r of rows) console.log(`| ${r.label} | ${f(r.median)} | ${f(r.min)} | ${f(r.max)} |`);
   console.log("");
   const over = rows[2]!.median - rows[1]!.median;
-  if (STARTER !== "sh") {
-    const esc = (t: string) => JSON.stringify(t).replace(/\|/g, "\\|");
-    console.log("#### Codex nesting, recorded as data (not a pass or fail)");
+  const esc = (t: string) => JSON.stringify(t).replace(/\|/g, "\\|");
+  for (const o of observed) {
+    console.log(`#### ${o.label}: recorded as data (not a pass or fail)`);
     console.log("");
     console.log("| run | exit code | timed out | stdout equals the direct form | stdout (JSON-escaped) | stderr (JSON-escaped) |");
     console.log("|---:|---:|---|---|---|---|");
-    nested.forEach((r, i) =>
+    o.seen.forEach((r, i) =>
       console.log(
         `| ${i + 1} | ${r.code ?? "none"} | ${r.timedOut} | ${r.out === directOut} | ${esc(r.out)} | ${esc(r.err.slice(0, 200))} |`,
       ),
     );
     console.log("");
-    console.log(`Direct form stdout: ${esc(directOut)}`);
-    console.log("");
   }
+  if (observed.length) console.log(`Direct form stdout: ${esc(directOut)}\n`);
   console.log(`Starter overhead over the bare Bun: ${f(over)} ms median (target ${st.target}${IS_WIN ? ", Windows" : ""}).`);
 } finally {
   server.stop();

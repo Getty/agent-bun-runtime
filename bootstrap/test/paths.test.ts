@@ -7,7 +7,9 @@ import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { IS_WIN, canonPath, samePath } from "./lib/harness";
+import { canonPath, samePath } from "./lib/paths";
+
+const IS_WIN = process.platform === "win32";
 
 describe("samePath", () => {
   test("a path that does not exist yet resolves through its existing ancestor", async () => {

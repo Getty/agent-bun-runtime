@@ -46,7 +46,10 @@ below are behavior.
 - `archive`: the release asset's file name, a plain `.zip` name. The download URL is
   `<base>/bun-v<version>/<archive>`, `<base>` being `GETTY_BUN_MIRROR` or
   `https://github.com/oven-sh/bun/releases/download` (for Bun's own assets this is the
-  plan's `bun-<target>.zip`).
+  plan's `bun-<target>.zip`). `GETTY_BUN_MIRROR` takes the downloader's schemes:
+  `getty-bun.sh` those of curl (http, https, file, ...) or, without curl, of wget (http,
+  https, ftp; no file); `getty-bun.ps1` http, https and file (file executed on
+  PowerShell 7 on Linux only).
 - `sha256`: the archive's SHA256, 64 lowercase hex digits, copied from the signature-
   verified `SHASUMS256.txt` (below). The starter checks it before unpacking; it never
   reads a checksum from a file next to the archive.
@@ -388,14 +391,32 @@ file stays pure ASCII with LF line endings (5.1 reads a file without BOM in the 
 code page). `GETTY_HOME` must be a drive-absolute (`C:\...`, `C:/...`) or UNC path;
 unset, it is `<user profile>\.getty`, never `$HOME` (Git Bash sets `HOME` to a
 `/c/Users/...` path). The executable is `bin\bun.exe`, the receipt's `executable` is
-`bin/bun.exe`.
+`bin/bun.exe`. (Commands, keys, exit codes, layout and the rejected relative
+`GETTY_HOME`: executed, CI 45572032454, except an empty stdin, see `run`. Pure ASCII: the
+static CI job. LF only: executed, CI 45572032454, where 5.1 parsed and ran the LF
+checkout (`.gitattributes` `eol=lf`) in the parse step and the scenario jobs on that
+image. The 5.1 code page, a UNC `GETTY_HOME` and the unset default: not checked.)
+
+**Evidence.** The labels in this section say what ran a claim. *Executed, CI
+45572032454*: the shared scenario suite in CI run 45572032454 (commit `d822139`) on
+GitHub's `windows-2025-vs2026` image 20261116.315.1, under Windows PowerShell
+5.1.26100.33822 and PowerShell 7.6.10, with Git for Windows' bash 5.3.15 and Defender
+real-time protection off. *Executed, pwsh 7 on Linux*: the Windows worker's local unit
+tests (not in the repository) on PowerShell 7.7.0 on Linux, neither Windows nor 5.1.
+*Not checked*: nothing has run it.
 
 **Targets.** `windows-x64` when `IsProcessorFeaturePresent` reports AVX2, otherwise
 `windows-x64-baseline`; the check compiles through `Add-Type`, and where that cannot
 load (Constrained Language Mode, no compiler) the answer is `windows-x64-baseline`. An
 x64 Bun whose `--version` probe dies with `STATUS_ILLEGAL_INSTRUCTION` publishes
 nothing; the starter then installs `windows-x64-baseline` under that target's own
-lock. ARM64 fails as an unsupported target.
+lock. ARM64 fails as an unsupported target. (The `Add-Type` check and the ARM64 failure,
+simulated through `PROCESSOR_ARCHITECTURE`: executed, CI 45572032454; there the check
+chose `windows-x64`, logged as `target windows-x64` by both per-hook cost jobs after a
+fresh `ensure` (jobs 139060757366 and 139060757556). The illegal-instruction fallback:
+executed, pwsh 7 on Linux, with a fixture probe that exits with that code. A real CPU
+without AVX2, and Constrained Language Mode, which also restricts the .NET calls the
+rest of the starter makes: not checked.)
 
 **Fast path.** The starter takes the first slot that exists of `windows-x64`, then
 `windows-x64-baseline`, without detecting the CPU: `ready` runs it, `mismatch` fails
@@ -403,7 +424,18 @@ closed (a damaged `windows-x64` slot is never skipped for a ready baseline slot)
 only when neither exists does it detect the target and install. `status` reports that
 slot, or, with neither present, the detected target's. The fast path uses no `Add-Type`
 and no cmdlet from a module that 5.1 would have to load (`[type]::new()`, never
-`New-Object`); the per-hook CI job measures what that costs.
+`New-Object`); the per-hook CI job measures what that costs. (`ready`, `mismatch` for a
+tampered receipt or a missing or empty `bun.exe`, and `missing`: executed, CI
+45572032454. The slot order and the own-functions-only rule: executed, pwsh 7 on Linux.)
+
+**Limit: a CPU that loses AVX2.** The fast path does not detect the CPU, so a slot
+installed as `windows-x64` stays the first existing slot when the same profile later
+runs on a CPU without AVX2 (a VM moved to an older host, a roaming profile). Bun then
+dies with an illegal instruction, `run` passes its exit code through as the entry's,
+and the fast path has no fallback to `windows-x64-baseline`. The fast path does not set
+the error mode either (below), so a Windows Error Reporting dialog may open. Repair:
+remove the `windows-x64` slot directory; the next call detects the target and installs
+`windows-x64-baseline`. (Not checked.)
 
 **Install bounds.** The download fails when no response arrives within 60 s or less than
 60 KiB arrive in a 60 s window, the counterpart of curl's `--speed-limit 1024
@@ -413,7 +445,11 @@ and no cmdlet from a module that 5.1 would have to load (`[type]::new()`, never
 Windows Error Reporting dialog while the lock is held; the previous mode is restored
 before the entry starts. A failed probe is retried once after about 1 s (antivirus may
 hold a fresh `bun.exe`), a timed-out one is not; the rename into the slot is retried for
-about 10 s on sharing violations.
+about 10 s on sharing violations. (The download window against a stalling and a
+trickling local server, the probe kill and the timed-out probe without retry: executed,
+pwsh 7 on Linux. The error-mode calls run, best effort, in every install of CI
+45572032454; that they took effect and keep a crash dialog away, the probe retry and the
+rename retry: not checked.)
 
 **Lock and `.installing`.** `.install.lock` is opened with `FileShare.None`; a sharing
 or lock violation means held and is retried every 200 ms until `GETTY_BUN_LOCK_WAIT`
@@ -425,32 +461,50 @@ runs out, any other error fails. The Windows values of the two OS-specific field
 | `environmentId` | `"<machine>/windows/<SID>"`: the machine name and the user's SID |
 
 Either is `null` when the starter cannot read it; `processName` is `powershell` or
-`pwsh`.
+`pwsh`. (Parallel `ensure`, a waiter whose wait runs out, the `.installing` record and
+the lock not leaking into Bun: executed, CI 45572032454.)
 
 **`run`.** Bun starts through `System.Diagnostics.Process` with the entry's arguments
 quoted by the `CommandLineToArgvW` rules; stdin and stdout are raw byte copies, stderr
 is inherited, and the exit code is Bun's. The starter ends once Bun has ended, even when
-the host keeps stdin open.
+the host keeps stdin open. (Executed, CI 45572032454, the open stdin included. An empty
+stdin failed there in the test entry's own zero-length `Bun.write` to the stdout pipe,
+`EINVAL` from `ftruncate` in Bun 1.4.5, so that case is not shown yet.)
 
 **Limit: entry arguments.** `-File` hands the arguments after the script path to
 PowerShell's own parameter binding: an entry argument shaped like `-name:value` or
 starting with `-` may be re-parsed by PowerShell (PowerShell 7 splits `-x:foo` into
-`-x` and `foo`). Entry arguments must not start with `-`.
+`-x` and `foo`: executed, pwsh 7 on Linux; 5.1: not checked). Entry arguments must not
+start with `-`. (Arguments with spaces, quotes, a trailing backslash and non-ASCII
+text: executed, CI 45572032454.)
 
 **Limit: no console of its own.** Bun starts with `CreateNoWindow`, so no console
 window opens for a hook. The trade-off: Ctrl+C in the host's console does not reach
 Bun, and Bun survives a kill of `powershell.exe`. Both are to be measured on a real host
-before phase 3a.
+before phase 3a. (Not checked.)
 
 **Git Bash, MSYS2 and Cygwin.** Under a `uname -s` of `MINGW*`, `MSYS*`, `CYGWIN*` or
 `*_NT-*`, `getty-bun.sh` forwards every call to the `getty-bun.ps1` next to it
 (`${0%.sh}.ps1`), so both starters share slot and lock. It runs Windows PowerShell
 5.1 from `$SYSTEMROOT\System32\WindowsPowerShell\v1.0\powershell.exe` (else
 `powershell.exe` or `pwsh.exe` on `PATH`) with the flags above, by `exec`, arguments
-unchanged; exit code and streams are PowerShell's. It needs `cygpath`. A `GETTY_HOME`
-starting with `/` is converted with `cygpath -w`; an empty or relative one passes
-unchanged and is rejected by `getty-bun.ps1`. A missing `getty-bun.ps1`, `cygpath` or
-PowerShell fails with one `getty-bun: ` line.
+unchanged; streams are PowerShell's; exit code: see the limit below. It needs
+`cygpath`. A `GETTY_HOME` starting with `/` is converted with `cygpath -w`; an empty or
+relative one passes unchanged and is rejected by `getty-bun.ps1`. A missing
+`getty-bun.ps1`, `cygpath` or PowerShell fails with one `getty-bun: ` line. (Shared slot
+and lock under Git Bash: executed, CI 45572032454. The converted `GETTY_HOME`, the
+failure lines and the unchanged arguments: executed on Linux only, with a fake `cygpath`
+and PowerShell under dash, bash and BusyBox sh; on Git Bash: not checked.)
+
+**Limit: PowerShell blocked by policy.** Where AppLocker or App Control (WDAC) blocks
+`powershell.exe`, the forwarding's executable check still passes and `exec` fails: the
+caller sees exit 126 and the shell's own error line, not a `getty-bun: ` line. (Not
+checked.)
+
+**Limit: exit codes through Git Bash.** The caller gets PowerShell's exit code as the
+MSYS runtime passes it on, which need not be all 32 bits. TODO (k9): what an entry's
+code above 255 and an NTSTATUS such as `0xC0000005` become there, from the scenario
+suite's measurement.
 
 **Limit: MSYS path conversion.** The forwarding sets `MSYS_NO_PATHCONV=1` and
 `MSYS2_ARG_CONV_EXCL='*'` so that the MSYS runtime does not rewrite arguments that look
