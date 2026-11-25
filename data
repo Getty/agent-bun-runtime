@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-25T08:01:49Z
+id: 15
+priority: low
+status: backlog
+tags:
+- ci
+- windows
+title: 'CI: windows-11-arm leg once windows-aarch64 is a target'
+updated: 2026-11-25T08:01:49Z
+---
+
+windows-aarch64 is outside the MVP (plan, MVP table). When a consumer needs it, add a bun-windows-aarch64 entry to versions.json, target detection in getty-bun.ps1 (PROCESSOR_ARCHITECTURE/ARM64, without the x64 emulation trap) and a windows-11-arm leg under powershell and pwsh.
