@@ -1,0 +1,13 @@
+---
+class: standard
+created: 2026-11-25T08:01:45Z
+id: 14
+priority: low
+status: backlog
+tags:
+- ci
+title: 'CI: actionlint step for the workflows'
+updated: 2026-11-25T08:01:45Z
+---
+
+Add actionlint (pinned by release checksum or commit SHA, like the actions) to the static job, so that workflow syntax, expression and shellcheck-in-run problems surface before a run. Phase 1 checks the workflows only by running them.
