@@ -1,0 +1,21 @@
+---
+class: standard
+completed: 2026-11-25T11:28:24Z
+created: 2026-11-25T05:21:39Z
+id: 6
+priority: high
+started: 2026-11-25T05:22:41Z
+status: done
+tags:
+- phase-1
+- bootstrap
+- posix
+title: 'Phase 1: version table for Bun 1.4.5, pin block format, pin render'
+updated: 2026-11-25T11:28:39Z
+---
+
+Part of k2. Lane: getty-bun-posix-worker. bootstrap/versions.json for Bun 1.4.5 with the five MVP targets (linux-x64, linux-x64-baseline, linux-aarch64, windows-x64, windows-x64-baseline): SHA256 per archive and the single expected member. Checksums come from SHASUMS256.txt after its signature SHASUMS256.txt.asc verified with gpg (isolated GNUPGHOME). Key origin and fingerprint in bootstrap/README.md. Then the pin block format (one block, the same in both starters) and the render from the table (unknown version fails). Done: table, README, render, gpg --verify output in the report.
+
+Table for 1.4.5 (5 targets), pin block format and bootstrap/render-pin.ts written; contract in bootstrap/README.md. SHASUMS256.txt.asc: good signature by F3DCC08A8572C0749B3E18888EAB4D40A7B22B59 (Robobun; key from the oven-sh/bun dockerhub Dockerfiles at 2e321d8, cross-checked with keys.openpgp.org), GnuPG 2.4.7 in a throwaway GNUPGHOME; 5 archives sha256 OK, members checked with unzip; re-verified independently by the coordinating session. Render: 21 scratch bun:test cases green. Not checked: shellcheck, PowerShell parsing. The Windows starter follows the new pin block format (k9).
+
+Commits (git log 65c7dee..262bc95): 174fc8f. Landed on main by fast-forward to 262bc95 (PR 1).
