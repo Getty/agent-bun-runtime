@@ -1,0 +1,153 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Harness Bun: only the test runner, never the Bun under test (the starters install that).
+  HARNESS_BUN_VERSION: "1.4.5"
+
+jobs:
+  scenarios:
+    name: scenarios (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x64 sh, os: ubuntu-latest, starter: sh }
+          - { name: linux-arm64 sh, os: ubuntu-24.04-arm, starter: sh }
+          - { name: windows powershell, os: windows-latest, starter: powershell }
+          - { name: windows pwsh, os: windows-latest, starter: pwsh }
+    env:
+      GETTY_BUN_TEST_STARTER: ${{ matrix.starter }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.HARNESS_BUN_VERSION }}
+      - name: Versions
+        shell: bash
+        run: |
+          uname -a
+          bun --version
+          if [ "$RUNNER_OS" = Windows ]; then
+            bash --version | head -n 1
+            powershell.exe -NoLogo -NoProfile -Command '$PSVersionTable | Format-List | Out-String'
+            pwsh -NoLogo -NoProfile -Command '$PSVersionTable | Format-List | Out-String'
+          fi
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .dev/fixtures
+          key: fixtures-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bootstrap/versions.json') }}
+      - name: Fetch fixtures
+        shell: bash
+        run: bun bootstrap/test/fetch-fixtures.ts
+      - name: Scenario suite
+        shell: bash
+        run: bun test bootstrap/test
+
+  static:
+    name: shellcheck and static checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.HARNESS_BUN_VERSION }}
+      - name: shellcheck
+        run: |
+          shellcheck --version
+          shellcheck bootstrap/getty-bun.sh
+      - name: getty-bun.ps1 is pure ASCII
+        run: |
+          if LC_ALL=C grep -nP '[^\x00-\x7F]' bootstrap/getty-bun.ps1; then
+            echo "bootstrap/getty-bun.ps1 contains non-ASCII bytes (Windows PowerShell 5.1 reads it in the ANSI code page)" >&2
+            exit 1
+          fi
+      - name: Pin blocks match a fresh render
+        run: bun bootstrap/render-pin.ts --table bootstrap/versions.json --version "$PIN_VERSION" --check bootstrap/getty-bun.sh bootstrap/getty-bun.ps1
+        env:
+          # The Bun the starters pin (bootstrap/versions.json); separate from the harness Bun.
+          PIN_VERSION: "1.4.5"
+
+  real-download:
+    # The plan asks for one real-download job. Two legs of one job (the ci-worker's call):
+    # sh on Linux, and Windows PowerShell 5.1, whose TLS defaults are the risk the leg
+    # exists for.
+    name: real download (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x64 sh, os: ubuntu-latest, starter: sh }
+          - { name: windows powershell, os: windows-latest, starter: powershell }
+    env:
+      GETTY_BUN_TEST_STARTER: ${{ matrix.starter }}
+      GETTY_BUN_TEST_REAL: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.HARNESS_BUN_VERSION }}
+      - name: Fetch fixtures
+        shell: bash
+        run: bun bootstrap/test/fetch-fixtures.ts
+      - name: Scenario suite with the real download
+        shell: bash
+        run: bun test bootstrap/test
+
+  hook-cost:
+    name: per-hook cost (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x64 sh, os: ubuntu-latest, starter: sh }
+          - { name: windows powershell, os: windows-latest, starter: powershell }
+          - { name: windows pwsh, os: windows-latest, starter: pwsh }
+    env:
+      GETTY_BUN_TEST_STARTER: ${{ matrix.starter }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.HARNESS_BUN_VERSION }}
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .dev/fixtures
+          key: fixtures-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bootstrap/versions.json') }}
+      - name: Fetch fixtures
+        shell: bash
+        run: bun bootstrap/test/fetch-fixtures.ts
+      - name: Measure the per-hook cost
+        shell: bash
+        run: |
+          {
+            echo "### Per-hook cost: ${{ matrix.name }} (${{ matrix.os }})"
+            echo
+            bun bootstrap/test/measure-hook.ts
+          } >> "$GITHUB_STEP_SUMMARY"

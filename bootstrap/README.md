@@ -1,0 +1,337 @@
+# bootstrap
+
+The getty-bun bootstrap: the starters that install the pinned Bun before Bun exists, the
+version table they are pinned from, and the pin render that connects the two. Plan and
+interface: [docs/plan.md](../docs/plan.md), "Starter interface (MVP)". Decisions:
+[ADR 0001](../docs/adr/0001-layout-and-delivery.md),
+[ADR 0004](../docs/adr/0004-one-starter-per-os.md),
+[ADR 0005](../docs/adr/0005-bun-pin-and-version-table.md).
+
+| File | What it is |
+|---|---|
+| `versions.json` | The reviewed version table: per Bun version and target the archive, its SHA256 and the single expected member |
+| `render-pin.ts` | The pin render: writes the pin block for one version into the starters, or checks them |
+| `getty-bun.sh`, `getty-bun.ps1` | The starters (POSIX `sh`, Windows PowerShell 5.1 and 7); each carries one pin block |
+
+This README is the contract the starters and the scenario suite code against: the table
+fields, the pin block format, the render CLI, the receipt and the `.installing` record
+below are behavior.
+
+## Version table: `versions.json`
+
+```json
+{
+  "versions": {
+    "1.4.5": {
+      "targets": {
+        "linux-x64": {
+          "archive": "bun-linux-x64.zip",
+          "sha256": "94559b3b528995a49452f9f2404cec74f2efd7d06e0a000a8cd214b02c3666eb",
+          "member": "bun-linux-x64/bun"
+        }
+      }
+    }
+  }
+}
+```
+
+(One target shown; every version lists all five.)
+
+- `versions` maps an exact Bun version to its entry. A new version is a new key; existing
+  entries are never edited.
+- `targets` holds exactly the five MVP targets: `linux-x64`, `linux-x64-baseline`,
+  `linux-aarch64`, `windows-x64`, `windows-x64-baseline`. A missing or an extra target
+  fails the render. musl, `windows-aarch64` and macOS come later as new targets in the
+  render and the starters, then in the table (ADR 0005).
+- `archive`: the release asset's file name, a plain `.zip` name. The download URL is
+  `<base>/bun-v<version>/<archive>`, `<base>` being `GETTY_BUN_MIRROR` or
+  `https://github.com/oven-sh/bun/releases/download` (for Bun's own assets this is the
+  plan's `bun-<target>.zip`).
+- `sha256`: the archive's SHA256, 64 lowercase hex digits, copied from the signature-
+  verified `SHASUMS256.txt` (below). The starter checks it before unpacking; it never
+  reads a checksum from a file next to the archive.
+- `member`: the one file the starter extracts, by name, to the slot's `bin/bun` or
+  `bin\bun.exe`. A relative path of `/`-separated segments of `[0-9A-Za-z._-]`, no
+  segment `.` or `..`.
+
+**Archive contents.** An archive is accepted when its entries are exactly `member` plus
+directory entries for `member`'s parent directories, nothing else. Bun's archives hold
+two entries, e.g. `bun-linux-x64/` and `bun-linux-x64/bun`. A second file, another name
+or any other directory is rejected.
+
+Table for 1.4.5 (checked 2026-11-25 against the downloaded archives with `sha256sum -c`
+and `unzip -l`):
+
+| Target | Archive | SHA256 | Member |
+|---|---|---|---|
+| `linux-x64` | `bun-linux-x64.zip` | `94559b3b528995a49452f9f2404cec74f2efd7d06e0a000a8cd214b02c3666eb` | `bun-linux-x64/bun` |
+| `linux-x64-baseline` | `bun-linux-x64-baseline.zip` | `dcb23a18a1c2fff12d57bcef696dbbb42eb67fde29f43816ecb595459a24c463` | `bun-linux-x64-baseline/bun` |
+| `linux-aarch64` | `bun-linux-aarch64.zip` | `18656a3bf0ea5641f5796ae4213b75255579a70a0fded2f337933785568cdf84` | `bun-linux-aarch64/bun` |
+| `windows-x64` | `bun-windows-x64.zip` | `815ab45ec7f549abf87e6869584b506eab088e24225683957b7e150b47d6de30` | `bun-windows-x64/bun.exe` |
+| `windows-x64-baseline` | `bun-windows-x64-baseline.zip` | `3c081c73865e7a3453a9d514cc2ba3d699880621bcf67bb17241ff5194cb1d4b` | `bun-windows-x64-baseline/bun.exe` |
+
+## Bun's release signing key
+
+Bun signs `SHASUMS256.txt` of every release as a cleartext signature,
+`SHASUMS256.txt.asc`. The trust anchor is the full fingerprint:
+
+```
+pub   ed25519 2023-01-25 [SC]
+      F3DC C08A 8572 C074 9B3E  1888 8EAB 4D40 A7B2 2B59
+uid   Robobun <robobun@oven.sh>
+sub   cv25519 2023-01-25 [E]
+      8CDF 8ECA BE81 CE3F 32AC  0472 36FA 8E87 7B80 AB05
+```
+
+**Origin.** The armored key below is the one Bun's own Docker images inline to verify
+releases: `dockerhub/debian/Dockerfile` in `oven-sh/bun` at commit
+`2e321d89067f623e648fb933daed375dc9e68bca` (main, 2026-11-25), fetched on 2026-11-25
+with `gh api 'repos/oven-sh/bun/contents/dockerhub/debian/Dockerfile?ref=2e321d89067f623e648fb933daed375dc9e68bca'`.
+The `alpine`, `debian-slim` and `distroless` Dockerfiles at that commit carry a
+byte-identical block, and each asserts the signer
+`F3DCC08A8572C0749B3E18888EAB4D40A7B22B59`. The key was inlined in commit `c7b06d94bac1`
+(2026-10-04); before that the same Dockerfiles fetched this fingerprint from
+keys.openpgp.org (seen at `14c23cc42952`, 2024-04-04). Cross-check: keys.openpgp.org
+(`/vks/v1/by-fingerprint/F3DCC08A8572C0749B3E18888EAB4D40A7B22B59`, fetched
+2026-11-25) serves the same key and UID.
+
+```
+-----BEGIN PGP PUBLIC KEY BLOCK-----
+
+mDMEY9GQFhYJKwYBBAHaRw8BAQdAkppAqaXl0RkROz6NfdvlwYd2UuUVfHLk2NNY
+IzEdnT+0GVJvYm9idW4gPHJvYm9idW5Ab3Zlbi5zaD6IkwQTFgoAOxYhBPPcwIqF
+csB0mz4YiI6rTUCnsitZBQJj0ZAWAhsDBQsJCAcCAiICBhUKCQgLAgQWAgMBAh4H
+AheAAAoJEI6rTUCnsitZ96UBAMvwCLD6Ud1RZkpvvnGUU+idHt2hcNmYU2d0XxDI
+HQ0rAQCA9VFOtjZefQkfhDzgIgnEEdSFXaMiyY+D+LP8awNMCrg4BGPRkBYSCisG
+AQQBl1UBBQEBB0BpfePYSOEx8PihYkNXjlK5YT89CGHjEK5etleaB9i6OwMBCAeI
+eAQYFgoAIBYhBPPcwIqFcsB0mz4YiI6rTUCnsitZBQJj0ZAWAhsMAAoJEI6rTUCn
+sitZvhAA/j4SQxOCLheRG86A2181WAP4qLS1qxSw+fCf28DgiPfbAQCL0kcel+M9
+qbRIlMnwn6TwlQgN9w1qqlSnA9CbKXT9Aw==
+=dGV6
+-----END PGP PUBLIC KEY BLOCK-----
+```
+
+Verified versions:
+
+| Version | Signature made | Verified |
+|---|---|---|
+| 1.4.5 | 2026-11-19 08:48:42 UTC, good signature by `F3DCC08A8572C0749B3E18888EAB4D40A7B22B59` | 2026-11-25, GnuPG 2.4.7, throwaway `GNUPGHOME` |
+
+## Adding a version
+
+ADR 0005. Downloads are untrusted data: each release goes into its own new, empty
+directory under `.dev/` (gitignored); never use your own keyring.
+
+```sh
+v=1.4.6                                   # the version to add
+d=.dev/release/bun-v$v
+mkdir -p .dev/release && mkdir "$d"       # fails if it exists: must be new and empty
+base=https://github.com/oven-sh/bun/releases/download/bun-v$v
+curl -fsSL --proto '=https' -o "$d/SHASUMS256.txt.asc" "$base/SHASUMS256.txt.asc"
+for t in linux-x64 linux-x64-baseline linux-aarch64 windows-x64 windows-x64-baseline; do
+  curl -fsSL --proto '=https' -o "$d/bun-$t.zip" "$base/bun-$t.zip"
+done
+
+export GNUPGHOME="$(mktemp -d "$PWD/.dev/gnupg.XXXXXX")"   # mode 700, empty
+sed -n '/^-----BEGIN PGP PUBLIC KEY BLOCK-----$/,/^-----END PGP PUBLIC KEY BLOCK-----$/p' \
+  bootstrap/README.md | gpg --batch --import
+gpg --batch --assert-signer F3DCC08A8572C0749B3E18888EAB4D40A7B22B59 \
+  --verify --output "$d.verified.txt" "$d/SHASUMS256.txt.asc"   # must exit 0
+
+(cd "$d" && grep -E '  bun-(linux-x64|linux-x64-baseline|linux-aarch64|windows-x64|windows-x64-baseline)\.zip$' \
+  "../bun-v$v.verified.txt" | sha256sum -c -)                  # five OK
+for t in linux-x64 linux-x64-baseline linux-aarch64 windows-x64 windows-x64-baseline; do
+  unzip -Z1 "$d/bun-$t.zip"                                     # the member and its directory
+done
+gpgconf --kill all; rm -rf "$GNUPGHOME"; unset GNUPGHOME
+```
+
+- Take the checksums only from gpg's `--output` (the signed text). Do not download
+  `SHASUMS256.txt` next to the `.asc`: gpg then warns "not a detached signature" and
+  exits 1.
+- `gpg` warns that the key "is not certified with a trusted signature": expected in a
+  throwaway home. `--assert-signer` with the full fingerprint is the check; a good
+  signature from any other key fails it.
+- A bad signature, a fingerprint mismatch or a checksum mismatch stops the addition.
+- Add the entry to `versions.json`, extend the verified-versions table above, render the
+  starters for the new version and run the scenario suite against them. The commit names
+  the verification (signer fingerprint, signature date, GnuPG version).
+
+## Pin block
+
+Each starter carries exactly one pin block. Both starters carry it byte for byte
+identical: every line is a `#` comment, which is a comment in `sh` and in PowerShell.
+The block is the only thing that selects the Bun version and the archive.
+
+Format:
+
+```
+# >>> getty-bun pin: generated, do not edit >>>
+# version <version>
+# target <target> <archive> <sha256> <member>
+# <<< getty-bun pin <<<
+```
+
+- The first and last lines are fixed marker lines, exactly as shown.
+- The second line is the version line. Then one target line per MVP target, in this
+  order: `linux-x64`, `linux-x64-baseline`, `linux-aarch64`, `windows-x64`,
+  `windows-x64-baseline`. Eight lines in all.
+- Fields are separated by one space; no leading or trailing spaces; lines end in LF; the
+  block is pure ASCII. The field values are the table's, with the shapes the render
+  enforces: `<version>` matches `^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$`, `<archive>`
+  is a plain `.zip` name, `<sha256>` is 64 lowercase hex digits, `<member>` is a relative
+  `/`-path of plain segments. None contains a space.
+- The block appears once per file. Place it near the top of the starter, before any code,
+  so the starter's scan ends early.
+
+Example, version 1.4.5:
+
+```
+# >>> getty-bun pin: generated, do not edit >>>
+# version 1.4.5
+# target linux-x64 bun-linux-x64.zip 94559b3b528995a49452f9f2404cec74f2efd7d06e0a000a8cd214b02c3666eb bun-linux-x64/bun
+# target linux-x64-baseline bun-linux-x64-baseline.zip dcb23a18a1c2fff12d57bcef696dbbb42eb67fde29f43816ecb595459a24c463 bun-linux-x64-baseline/bun
+# target linux-aarch64 bun-linux-aarch64.zip 18656a3bf0ea5641f5796ae4213b75255579a70a0fded2f337933785568cdf84 bun-linux-aarch64/bun
+# target windows-x64 bun-windows-x64.zip 815ab45ec7f549abf87e6869584b506eab088e24225683957b7e150b47d6de30 bun-windows-x64/bun.exe
+# target windows-x64-baseline bun-windows-x64-baseline.zip 3c081c73865e7a3453a9d514cc2ba3d699880621bcf67bb17241ff5194cb1d4b bun-windows-x64-baseline/bun.exe
+# <<< getty-bun pin <<<
+```
+
+**Reading it in a starter.** Read the starter's own file line by line; from the begin
+marker on, take the line starting with `# version ` and the line starting with
+`# target <detected target> ` (with the trailing space, so `linux-x64` does not match
+`linux-x64-baseline`); stop at the end marker. Compare whole lines and prefixes as
+plain strings, never as regular expressions or after trimming. Split the target line's
+rest on single spaces into archive, SHA256 and member. A missing block, a missing
+version line or a missing target line is a starter failure (one `getty-bun: ` line,
+exit 1), never a fallback. The fast path needs only the version line; the target line
+is needed for install.
+
+- `sh`: one `while IFS= read -r line` loop over the file with `case` on the exact
+  strings; no subprocess. A loop of this shape parsed the 1.4.5 block under `dash` in
+  about 3 ms per run, process start included.
+- PowerShell: `[System.IO.File]::ReadAllLines($PSCommandPath)`, exact comparison
+  (`-ceq`, `StartsWith(..., [StringComparison]::Ordinal)`), `.Split(' ')`. Not
+  `-match` (regex) and not `Select-String`.
+
+## Render CLI: `render-pin.ts`
+
+```
+bun bootstrap/render-pin.ts --table FILE --version V FILE...
+bun bootstrap/render-pin.ts --table FILE --version V --check FILE...
+```
+
+Runs on Bun at development and CI time; no dependencies, never on a user machine.
+
+- Without `--check`: replaces everything from the begin marker line to the end marker
+  line, inclusive, in each `FILE` with a fresh block for version `V` from `--table`.
+  Everything outside the block stays byte for byte. A file already up to date is not
+  rewritten. Nothing on stdout.
+- With `--check`: changes nothing; exits 1 when any `FILE` differs from a fresh render,
+  with one `getty-bun: ` stderr line per differing file. For a consumer's CI: the version
+  is the consumer's `package.json` `gettyBun.bunVersion`.
+- `--table` takes any path, so tests render with a fixture table and a fake version.
+- Options may come in any order; every other argument is a `FILE`, which therefore must
+  not begin with `-`.
+
+| Exit | When |
+|---|---|
+| 0 | Every `FILE` rendered (or, with `--check`, equal to a fresh render) |
+| 1 | Anything else, with one stderr line beginning `getty-bun: `; never 2 |
+
+Failures, each one line; all but a write error are found before any file is written:
+
+- usage (missing `--table`, `--version` or `FILE`, unknown option)
+- table unreadable or not JSON (`cannot read table <path>: ENOENT`)
+- `version <V> is not in table <path>`
+- a target missing or unknown, or a field of the wrong shape, naming version and target
+- `<file>: pin block markers not found`, `more than one pin block`,
+  `end marker before begin marker` (a file with CRLF line endings has no marker lines)
+- `cannot read file <path>`, `cannot write file <path>`
+
+Only the selected version's entry is validated.
+
+## Slot and receipt
+
+A slot is published once, as a whole directory, by one rename from staging, and never
+changed afterwards:
+
+```
+<GETTY_HOME>/runtimes/bun/<version>/<target>/
+  bin/bun              (bin\bun.exe on Windows)
+  receipt.json
+```
+
+The installing starter writes `receipt.json` into the staged slot after every check has
+passed (archive SHA256, member list, `bun --version`), then renames the slot into place.
+Canonical form, the same on every OS: ASCII, LF line endings, two-space indentation, one
+key per line, the keys in this order, a final newline. Example (linux-x64-baseline):
+
+```json
+{
+  "version": "1.4.5",
+  "target": "linux-x64-baseline",
+  "archiveSha256": "dcb23a18a1c2fff12d57bcef696dbbb42eb67fde29f43816ecb595459a24c463",
+  "contractVersion": 1,
+  "archive": "bun-linux-x64-baseline.zip",
+  "member": "bun-linux-x64-baseline/bun",
+  "binarySha256": "f05d28a3862f4b84395c7fa32480b835dd47482e80b7e7a49a115227f0c06083",
+  "executable": "bin/bun",
+  "verifiedAt": "2026-11-25T10:00:00Z"
+}
+```
+
+| Key | Value |
+|---|---|
+| `version` | The pinned Bun version, which `bun --version` reported |
+| `target` | The slot's target |
+| `archiveSha256` | The pinned SHA256 the downloaded archive matched |
+| `contractVersion` | The runtime contract version, the number `1` (contract v0.2 keeps 1) |
+| `archive` | The archive file name from the pin |
+| `member` | The archive member extracted as the executable |
+| `binarySha256` | SHA256 of the extracted executable; recorded for audits, never checked on the fast path |
+| `executable` | The executable relative to the slot, with `/`: `bin/bun` or `bin/bun.exe` |
+| `verifiedAt` | UTC time of the verification, `YYYY-MM-DDTHH:MM:SSZ` |
+
+**Fast path.** `ready` means: `receipt.json` is a readable regular file, the executable
+is a regular file (executable on POSIX), and the receipt's first three lines are exactly
+
+```
+{
+  "version": "<pinned version>",
+  "target": "<detected target>",
+```
+
+compared as whole strings. That is why the form is fixed: the fast path reads three
+lines, parses no JSON, hashes nothing and never starts Bun. No slot at all is `missing`;
+anything else (other values, another layout, a missing executable) is `mismatch`, which
+fails closed with the slot path and leaves the slot untouched. Other readers parse the
+receipt as JSON and ignore keys they do not know; a new key goes after `archiveSha256`.
+
+## Install lock and `.installing`
+
+`runtimes/bun/.locks/<version>/<target>/` holds `.install.lock`, the permanent backing
+file of the OS lock, and while an install runs, `.installing`. The lock holder writes
+`.installing` after taking the lock (complete temporary file, then rename in the same
+directory) and removes it before releasing the lock, on success and on every failure.
+It is diagnostics for a waiter that times out, which names it in its message; it never
+grants or proves ownership and no starter deletes a lock because of it.
+
+```json
+{
+  "schemaVersion": 1,
+  "pid": 12345,
+  "processName": "sh",
+  "processStartToken": "boot:<boot id>/start-ticks:<n>",
+  "installId": "<staging directory name>",
+  "environmentId": "<hostname>/linux/uid-<uid>",
+  "requestedVersion": "1.4.5",
+  "target": "linux-x64-baseline"
+}
+```
+
+`pid` and `processName` are the starter's own. `processStartToken` and `environmentId`
+are `null` when the OS does not provide them; the values above are the POSIX starter's
+(from `/proc`), and the Windows starter defines its own for these two fields. A holder
+killed outright can leave `.installing` behind; the next holder overwrites it. The lock
+is released before Bun starts, so an entry never inherits it.

@@ -1,3 +1,11 @@
 Revision history for getty-bun
 
 {{$NEXT}}
+  - POSIX starter bootstrap/getty-bun.sh with run, ensure and status:
+    installs the pinned Bun on demand under a lock, then runs the given
+    command on it.
+  - Version table (bootstrap/versions.json) pins Bun 1.4.5 with SHA256
+    checksums for five targets; render-pin.ts writes the pin block into
+    the starters.
+  - Shared scenario suite (bootstrap/test) runs the starter against a
+    local fixture server with an isolated GETTY_HOME.

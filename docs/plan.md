@@ -98,6 +98,28 @@ getty-bun.ps1 <same commands>         identical behavior and exit codes
 - Fast path: no network, no hashing; the slot's receipt and executable must match the
   pin. A slot that does not match fails closed with a message; it is never overwritten.
 
+Interface details fixed at the start of phase 1, so both starters and the scenario suite
+code against one definition (the pin block format itself is defined with the render, in
+`bootstrap/README.md`):
+
+- **Location.** A consumer carries the starters as `<root>/bootstrap/getty-bun.sh` and
+  `<root>/bootstrap/getty-bun.ps1`; the consumer root is the parent of the starter's
+  directory.
+- **Download URL.** `<base>/bun-v<version>/bun-<target>.zip`, where `<base>` is
+  `GETTY_BUN_MIRROR` or `https://github.com/oven-sh/bun/releases/download`.
+- **Store.** Slot `<GETTY_HOME>/runtimes/bun/<version>/<target>/` with `bin/bun` (or
+  `bin\bun.exe`) and `receipt.json`; lock
+  `<GETTY_HOME>/runtimes/bun/.locks/<version>/<target>/.install.lock`; staging
+  `<GETTY_HOME>/runtimes/bun/.staging/<id>/`.
+- **`status`.** Keys `pin` (the pinned version), `target`, `slot` (absolute path) and
+  `state`, one of `ready`, `missing`, `mismatch`. Exit 0 whenever the object was printed;
+  1 when the state cannot be determined (for example an unsupported target).
+- **Errors.** Every starter failure is one stderr line beginning with `getty-bun: `,
+  naming what failed and where, and exit 1. `run` passes the entry's own exit code
+  through unchanged.
+- **Environment.** `GETTY_HOME` that is set but not absolute is an error.
+  `GETTY_BUN_LOCK_WAIT` is a whole number of seconds.
+
 ## Phases and gates
 
 | Phase | Build | Gate before moving on |
