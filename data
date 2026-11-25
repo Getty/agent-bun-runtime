@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-25T16:38:45Z
+id: 19
+priority: medium
+status: backlog
+tags:
+- windows
+- bootstrap
+title: 'Windows starter: second bun --version probe after publish, ps1 only'
+updated: 2026-11-25T16:38:45Z
+---
+
+getty-bun.ps1:566-572 compares the version again after publish and after releasing the lock (Test-Bun) and exits 1 on failure; the slot stays published, so the next call takes the fast path and the failure shows only once. getty-bun.sh has no such probe, against plan 'identical behavior and exit codes'. Origin: docs/windows-referenzen.md point 12 in the agent-developer hub (antivirus holding a fresh bun.exe). Decide: drop it, or specify it for both starters in bootstrap/README.md and the suite. Until then plan, getty-bun-windows and the contract name it as an open difference. Found by the hub's review, agent-developer k1.
