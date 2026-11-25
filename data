@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-25T17:14:46Z
+id: 20
+priority: low
+status: backlog
+tags:
+- bootstrap
+- rename
+title: Starter comments name the old repository (getty-bun.sh:8, getty-bun.ps1:9)
+updated: 2026-11-25T17:14:46Z
+---
+
+After the rename to agent-bun-runtime (ADR 0008) the header comments of both starters still say 'docs/plan.md in getty-bun', meaning the repository. Change both in one task (posix worker defines, windows worker follows), keep the pin block untouched, and let the template getty-bun-install (Getty/skills, hub card agent-developer k3) carry the same wording. Both reviewers, as for any bootstrap change.
