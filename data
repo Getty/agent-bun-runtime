@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-25T08:33:43Z
+id: 17
+priority: low
+status: backlog
+tags:
+- bootstrap
+- linux
+title: 'POSIX starter: wget download failure line has no reason'
+updated: 2026-11-25T08:33:43Z
+---
+
+With wget only (no curl), getty-bun.sh runs wget with -q, so a failed download ends in "failed (wget exit 1): " with nothing after the colon (getty-bun.sh around line 298, found in the round-four review; wget refusing a file:// mirror is one way to get there). The line names the URL but not the reason. Keep one stderr line: capture the last line of wget's own stderr (drop -q or use -nv) and append it, as the curl branch does.
