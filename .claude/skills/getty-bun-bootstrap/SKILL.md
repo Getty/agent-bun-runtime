@@ -45,8 +45,8 @@ exist: `getty-bun.sh` needs POSIX `sh`, `curl` or `wget`, `unzip`, `sha256sum` (
 Linux: `uname -m` (`x86_64` -> `x64`, `aarch64`/`arm64` -> `aarch64`); `x64` without the
 `avx2` flag in `/proc/cpuinfo` -> `x64-baseline`; unreadable -> baseline. musl is not an
 MVP target: detect it and fail with a message. Under Git Bash, MSYS or Cygwin
-(`uname -s` `MINGW*`, `MSYS*`, `CYGWIN*`) the `sh` starter forwards to the PowerShell
-one and does nothing itself.
+(`uname -s` `MINGW*`, `MSYS*`, `CYGWIN*` or any `*_NT-*`, which covers MSYS2's UCRT64
+and CLANG64) the `sh` starter forwards to the PowerShell one and does nothing itself.
 
 ## Tests
 

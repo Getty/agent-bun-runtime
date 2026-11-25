@@ -30,10 +30,45 @@ usage() {
   fail "usage: getty-bun.sh run <entry> [args...] | ensure | status"
 }
 
-# Under Git Bash, MSYS and Cygwin the PowerShell starter owns the slot and its lock, so
-# this starter forwards every call to getty-bun.ps1. Must not return.
+# Under Git Bash, MSYS2 and Cygwin the PowerShell starter owns the slot and its lock, so
+# this starter hands every call to the getty-bun.ps1 next to it, arguments unchanged, by
+# exec: exit code, stdin, stdout and stderr are PowerShell's. Must not return.
 forward_to_powershell() {
-  fail "under $os this starter must forward to getty-bun.ps1, which is not implemented yet"
+  _ps1=${0%.sh}.ps1
+  [ -f "$_ps1" ] || fail "under $os this starter forwards to $(one_line "$_ps1"), which is missing"
+  command -v cygpath >/dev/null 2>&1 || fail "under $os this starter needs cygpath to forward to $(one_line "$_ps1")"
+  _ps1w=$(cygpath -w -a -- "$_ps1" 2>/dev/null) || _ps1w=
+  [ -n "$_ps1w" ] || fail "cygpath cannot convert $(one_line "$_ps1") to a Windows path"
+  # Windows PowerShell 5.1 by its fixed path; SYSTEMROOT is a Windows path.
+  _ps=
+  _sr=${SYSTEMROOT:-${SystemRoot-}}
+  if [ -n "$_sr" ]; then
+    _sr=$(cygpath -u -- "$_sr" 2>/dev/null) || _sr=
+  fi
+  if [ -n "$_sr" ] && [ -x "$_sr/System32/WindowsPowerShell/v1.0/powershell.exe" ]; then
+    _ps=$_sr/System32/WindowsPowerShell/v1.0/powershell.exe
+  else
+    _ps=$(command -v powershell.exe 2>/dev/null) || _ps=$(command -v pwsh.exe 2>/dev/null) || _ps=
+  fi
+  if [ -z "$_ps" ] || [ ! -x "$_ps" ]; then
+    fail "under $os this starter needs Windows PowerShell: no executable \$SYSTEMROOT/System32/WindowsPowerShell/v1.0/powershell.exe, powershell.exe or pwsh.exe on PATH"
+  fi
+  # A POSIX GETTY_HOME becomes the Windows path PowerShell needs; an empty or relative one
+  # passes unchanged, so getty-bun.ps1 rejects it as getty-bun.sh would.
+  case ${GETTY_HOME-} in
+    /*)
+      _gh=$(cygpath -w -- "$GETTY_HOME" 2>/dev/null) || _gh=
+      [ -n "$_gh" ] || fail "cygpath cannot convert GETTY_HOME '$(one_line "$GETTY_HOME")' to a Windows path"
+      GETTY_HOME=$_gh
+      export GETTY_HOME
+      ;;
+  esac
+  # No MSYS path conversion of the arguments. Both variables reach PowerShell, Bun and the
+  # entry (bootstrap/README.md, "Windows starter").
+  MSYS_NO_PATHCONV=1
+  MSYS2_ARG_CONV_EXCL='*'
+  export MSYS_NO_PATHCONV MSYS2_ARG_CONV_EXCL
+  exec "$_ps" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$_ps1w" "$@"
 }
 
 # Staging and the .installing record of this process; removed on every exit.
@@ -352,7 +387,7 @@ _u=$(uname -sm 2>/dev/null) || fail "uname failed"
 os=${_u%% *}
 mach=${_u##* }
 case $os in
-  MINGW* | MSYS* | CYGWIN*) forward_to_powershell "$@" ;;
+  MINGW* | MSYS* | CYGWIN* | *_NT-*) forward_to_powershell "$@" ;;
 esac
 
 cmd=${1-}

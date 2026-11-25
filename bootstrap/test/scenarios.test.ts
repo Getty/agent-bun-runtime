@@ -18,10 +18,12 @@ import {
   STARTER,
   UMLAUTS,
   archivePath,
+  expectExit,
   failureLine,
   fakeBunDir,
   findGitBashExe,
   hostTargets,
+  samePath,
   holdLock,
   install,
   listDir,
@@ -69,18 +71,18 @@ describe(`scenario 1: fresh install, then the fast path [${STARTER}]`, () => {
     const sb = await sandbox({ mirror: server.url });
 
     const before = await starter(sb, ["status"]);
-    expect(before.code).toBe(0);
+    expectExit(before, 0);
     const st = JSON.parse(before.out);
     expect(Object.keys(st).sort()).toEqual(["pin", "slot", "state", "target"]);
     expect(st.pin).toBe(REAL_VERSION);
     expect(st.state).toBe("missing");
     expect(hostTargets()).toContain(st.target);
-    expect(st.slot).toBe(slotOf(sb, st.target));
+    expect(samePath(st.slot, slotOf(sb, st.target))).toBe(true);
     expect(server.total()).toBe(0);
     expect(await exists(st.slot)).toBe(false);
 
     const first = await starter(sb, ["ensure"]);
-    expect(first.code).toBe(0);
+    expectExit(first, 0);
     expect(first.out).toBe("");
     expect(server.archives()).toBe(1);
     expect(server.count(archivePath(REAL_VERSION, st.target))).toBe(1);
@@ -93,12 +95,12 @@ describe(`scenario 1: fresh install, then the fast path [${STARTER}]`, () => {
     expect(after).toEqual({ ...st, state: "ready" });
 
     const second = await starter(sb, ["ensure"]);
-    expect(second.code).toBe(0);
+    expectExit(second, 0);
     expect(second.out).toBe("");
     expect(server.total()).toBe(1); // zero new requests
 
     const third = await starter(sb, ["run", "entries/info.ts"]);
-    expect(third.code).toBe(0);
+    expectExit(third, 0);
     expect(server.total()).toBe(1);
     expect(JSON.parse(third.out).version).toBe(REAL_VERSION);
   });
@@ -108,7 +110,7 @@ describe(`scenario 1: fresh install, then the fast path [${STARTER}]`, () => {
     const sb = await sandbox({ mirror: server.url });
     const st = await install(sb);
     const r = await run([slotBun(st.slot), "--version"], { env: sb.env, cwd: sb.cwd, timeoutMs: 30_000 });
-    expect(r.code).toBe(0);
+    expectExit(r, 0);
     expect(r.out.trim()).toBe(REAL_VERSION);
   });
 });
@@ -121,7 +123,7 @@ describe(`scenario 2: parallel ensure [${STARTER}]`, () => {
     const results = await Promise.all([1, 2, 3, 4].map(() => starter(sb, ["ensure"])));
     for (const r of results) {
       expect(r.err).toBe(""); // a successful ensure is silent, waiters included
-      expect(r.code).toBe(0);
+      expectExit(r, 0);
       expect(r.out).toBe("");
     }
     expect(server.archives()).toBe(1);
@@ -162,7 +164,7 @@ describe(`scenario 2b: the install lock is not leaked into Bun [${STARTER}]`, ()
 
     const lock = await tryLock(lockFile(sb, REAL_VERSION, st.target));
     expect(lock.err).toBe("");
-    expect(lock.code).toBe(0); // 1 would mean the starter's lock descriptor leaked into Bun
+    expectExit(lock, 0); // 1 would mean the starter's lock descriptor leaked into Bun
 
     proc.stdin.end();
     let rest = "";
@@ -187,7 +189,7 @@ describe(`scenario 3: a waiter whose lock wait runs out [${STARTER}]`, () => {
     const holder = await holdLock(lockFile(sb, REAL_VERSION, st.target));
 
     const r = await starter(sb, ["ensure"], { env: { GETTY_BUN_LOCK_WAIT: "2" }, timeoutMs: 60_000 });
-    expect(r.code).toBe(1);
+    expectExit(r, 1);
     expect(r.out).toBe("");
     const msg = failureLine(r);
     expect(msg).toMatch(/time(d)? ?out/i);
@@ -201,7 +203,7 @@ describe(`scenario 3: a waiter whose lock wait runs out [${STARTER}]`, () => {
     // the lock was never stolen: after the holder lets go, the next call installs
     await holder.release();
     const ok = await starter(sb, ["ensure"]);
-    expect(ok.code).toBe(0);
+    expectExit(ok, 0);
     expect((await status(sb)).state).toBe("ready");
   });
 });
@@ -220,7 +222,7 @@ describe(`scenario 4: wrong checksum [${STARTER}]`, () => {
     const st = await status(sb);
 
     const r = await starter(sb, ["ensure"]);
-    expect(r.code).toBe(1);
+    expectExit(r, 1);
     expect(r.out).toBe("");
     expect(failureLine(r)).toMatch(/sha-?256|checksum/i);
     expect(server.archives()).toBe(1); // it was fetched, then judged
@@ -263,9 +265,10 @@ describe(`scenario 5: unexpected or extra archive member [${STARTER}]`, () => {
       const { sb, server } = await variant(kind);
       const st = await status(sb);
       const r = await starter(sb, ["ensure"]);
-      expect(r.code).toBe(1);
+      expectExit(r, 1);
       expect(r.out).toBe("");
-      expect(failureLine(r)).toMatch(/member|entr(y|ies)|unexpected|archive/i);
+      // names the rejected entry, so a ZipFile that cannot read the archive at all stays red
+      expect(failureLine(r)).toContain(kind === "extra" ? "extra-member.txt" : "not-bun");
       expect(server.archives()).toBe(1); // the checksum matched, so it got as far as the member check
       expect(await exists(st.slot)).toBe(false);
       expect(await stagingLeft(sb)).toEqual([]);
@@ -289,7 +292,7 @@ describe(`scenario 6: a slot that does not match fails closed [${STARTER}]`, () 
 
     for (const args of [["ensure"], ["run", "entries/info.ts"]]) {
       const r = await starter(sb, args);
-      expect(r.code).toBe(1);
+      expectExit(r, 1);
       expect(r.out).toBe("");
       const msg = failureLine(r);
       expect(msg).toContain(st.slot);
@@ -298,7 +301,7 @@ describe(`scenario 6: a slot that does not match fails closed [${STARTER}]`, () 
     expect(server.total()).toBe(requests);
 
     const s = await starter(sb, ["status"]);
-    expect(s.code).toBe(0);
+    expectExit(s, 0);
     expect(JSON.parse(s.out).state).toBe("mismatch");
   });
 
@@ -314,7 +317,7 @@ describe(`scenario 6: a slot that does not match fails closed [${STARTER}]`, () 
     expect(st.pin).toBe(version);
 
     const r = await starter(sb, ["ensure"]);
-    expect(r.code).toBe(1);
+    expectExit(r, 1);
     expect(r.out).toBe("");
     expect(failureLine(r)).toMatch(/version/i);
     expect(server.archives()).toBe(1);
@@ -334,11 +337,11 @@ describe(`scenario 7: a wrong bun on PATH is ignored [${STARTER}]`, () => {
     const env = { PATH: `${fake.dir}${sep}${sb.env.PATH}` };
 
     const r = await starter(sb, ["run", "entries/info.ts"], { env }); // installs, then runs
-    expect(r.code).toBe(0);
+    expectExit(r, 0);
     const info = JSON.parse(r.out);
     expect(info.version).toBe(REAL_VERSION);
     const st = await status(sb, { env });
-    expect(info.execPath.toLowerCase()).toBe(slotBun(st.slot).toLowerCase());
+    expect(samePath(info.execPath, slotBun(st.slot))).toBe(true);
     expect(existsSync(fake.marker)).toBe(false);
   });
 });
@@ -361,7 +364,7 @@ describe(`scenario 8: run passes stdin, stdout and the exit code through [${STAR
       ...new TextEncoder().encode("end"),
     ]);
     const r = await starter(sb, ["run", "entries/echo.ts", "0"], { stdin: payload, timeoutMs: 60_000 });
-    expect(r.code).toBe(0);
+    expectExit(r, 0);
     expect(Buffer.from(r.stdout).equals(Buffer.from(payload))).toBe(true);
     expect(r.err).toBe("");
   });
@@ -371,7 +374,7 @@ describe(`scenario 8: run passes stdin, stdout and the exit code through [${STAR
     const big = new Uint8Array(3 * 1024 * 1024);
     for (let i = 0; i < big.length; i++) big[i] = (i * 31 + (i >> 8)) & 0xff;
     const r = await starter(sb, ["run", "entries/echo.ts", "0"], { stdin: big, timeoutMs: 90_000 });
-    expect(r.code).toBe(0);
+    expectExit(r, 0);
     expect(r.stdout.length).toBe(big.length);
     expect(Buffer.from(r.stdout).equals(Buffer.from(big))).toBe(true);
   });
@@ -379,14 +382,14 @@ describe(`scenario 8: run passes stdin, stdout and the exit code through [${STAR
   test("an empty stdin ends at once", async () => {
     const { sb } = await ready();
     const r = await starter(sb, ["run", "entries/echo.ts", "0"], { stdin: new Uint8Array(), timeoutMs: 60_000 });
-    expect(r.code).toBe(0);
+    expectExit(r, 0);
     expect(r.stdout.length).toBe(0);
   });
 
   test("UTF-8 umlauts on stdout are byte for byte", async () => {
     const { sb } = await ready();
     const r = await starter(sb, ["run", "entries/emit.ts"]);
-    expect(r.code).toBe(0);
+    expectExit(r, 0);
     expect(Buffer.from(r.stdout).equals(Buffer.from(new TextEncoder().encode(UMLAUTS)))).toBe(true);
   });
 
@@ -394,7 +397,7 @@ describe(`scenario 8: run passes stdin, stdout and the exit code through [${STAR
     test(`the entry's exit code ${code} propagates`, async () => {
       const { sb } = await ready();
       const r = await starter(sb, ["run", "entries/echo.ts", String(code)], { stdin: "x" });
-      expect(r.code).toBe(code); // 2 is the entry's own code here, not a starter failure
+      expectExit(r, code); // 2 is the entry's own code here, not a starter failure
       expect(r.out).toBe("x");
     });
   }
@@ -403,14 +406,14 @@ describe(`scenario 8: run passes stdin, stdout and the exit code through [${STAR
     const { sb } = await ready();
     const args = ["plain", "with space", 'say "hi"', "trailing\\", "dir with space\\", "äß日"];
     const r = await starter(sb, ["run", "entries/info.ts", ...args]);
-    expect(r.code).toBe(0);
+    expectExit(r, 0);
     expect(JSON.parse(r.out).argv).toEqual(args);
   });
 
   test("the consumer root comes from the starter's path, not the working directory", async () => {
     const { sb } = await ready();
     const r = await starter(sb, ["run", "entries/info.ts"]); // cwd is <tmp>/cwd, not the consumer root
-    expect(r.code).toBe(0);
+    expectExit(r, 0);
     expect(JSON.parse(r.out).argv).toEqual([]);
   });
 
@@ -447,7 +450,7 @@ describe(`scenario 8: run passes stdin, stdout and the exit code through [${STAR
     const server = await realServer();
     const sb = await sandbox({ mirror: server.url });
     const r = await starter(sb, ["run", "entries/echo.ts", "0"], { stdin: "hello\n" });
-    expect(r.code).toBe(0);
+    expectExit(r, 0);
     expect(r.out).toBe("hello\n");
     expect(server.archives()).toBe(1);
   });
@@ -464,10 +467,10 @@ describe(`scenario 9: spaces and non-ASCII in GETTY_HOME and the consumer root [
     });
     const before = await status(sb);
     expect(before.state).toBe("missing");
-    expect(before.slot).toBe(slotOf(sb, before.target));
+    expect(samePath(before.slot, slotOf(sb, before.target))).toBe(true);
 
     const r = await starter(sb, ["run", "entries/echo.ts", "0"], { stdin: UMLAUTS });
-    expect(r.code).toBe(0);
+    expectExit(r, 0);
     expect(r.out).toBe(UMLAUTS);
     expect(server.archives()).toBe(1);
 
@@ -478,7 +481,7 @@ describe(`scenario 9: spaces and non-ASCII in GETTY_HOME and the consumer root [
     expect(await stagingLeft(sb)).toEqual([]);
 
     const info = await starter(sb, ["run", "entries/info.ts", "ä b"]);
-    expect(info.code).toBe(0);
+    expectExit(info, 0);
     expect(JSON.parse(info.out).argv).toEqual(["ä b"]);
   });
 });
@@ -493,10 +496,10 @@ describe(`scenario 10: offline after install [${STARTER}]`, () => {
     server.stop();
 
     const r = await starter(sb, ["run", "entries/echo.ts", "0"], { stdin: "offline\n" });
-    expect(r.code).toBe(0);
+    expectExit(r, 0);
     expect(r.out).toBe("offline\n");
     const e = await starter(sb, ["ensure"]);
-    expect(e.code).toBe(0);
+    expectExit(e, 0);
     expect(server.total()).toBe(requests);
   });
 });
@@ -532,14 +535,14 @@ describe(`scenario 11: Git Bash forwarding shares slot and lock with PowerShell 
     const st = await install(sb);
     const requests = server.total();
     const viaBash = await bash(["status"]);
-    expect(viaBash.code).toBe(0);
+    expectExit(viaBash, 0);
     const bst = JSON.parse(viaBash.out);
     expect(bst.state).toBe("ready");
     expect(bst.pin).toBe(st.pin);
     expect(bst.target).toBe(st.target);
-    expect(bst.slot.replace(/\//g, "\\").toLowerCase()).toBe(st.slot.replace(/\//g, "\\").toLowerCase());
+    expect(samePath(bst.slot, st.slot)).toBe(true);
     const ran = await bash(["run", "entries/echo.ts", "0"], { stdin: "via git bash\n" });
-    expect(ran.code).toBe(0);
+    expectExit(ran, 0);
     expect(ran.out).toBe("via git bash\n");
     expect(server.total()).toBe(requests);
 
@@ -551,7 +554,7 @@ describe(`scenario 11: Git Bash forwarding shares slot and lock with PowerShell 
       [bashExe!, join(sb2.root, "bootstrap", "getty-bun.sh").replace(/\\/g, "/"), "ensure"],
       { env: { ...sb2.env, GETTY_BUN_LOCK_WAIT: "2" }, cwd: sb2.cwd, timeoutMs: 60_000 },
     );
-    expect(blocked.code).toBe(1);
+    expectExit(blocked, 1);
     expect(failureLine(blocked)).toContain("getty-bun: ");
     expect(await exists(st2.slot)).toBe(false);
     expect(await stagingLeft(sb2)).toEqual([]);
@@ -565,7 +568,7 @@ describe(`starter contract: environment and errors [${STARTER}]`, () => {
     const sb = await sandbox({ mirror: server.url });
     for (const cmd of [["status"], ["ensure"], ["run", "entries/info.ts"]]) {
       const r = await starter(sb, cmd, { env: { GETTY_HOME: "relative-home" } });
-      expect(r.code).toBe(1);
+      expectExit(r, 1);
       expect(r.out).toBe("");
       expect(failureLine(r)).toContain("GETTY_HOME");
     }
@@ -578,7 +581,7 @@ describe(`starter contract: environment and errors [${STARTER}]`, () => {
     const server = await realServer();
     const sb = await sandbox({ mirror: server.url });
     const r = await starter(sb, ["frobnicate"]);
-    expect(r.code).toBe(1);
+    expectExit(r, 1);
     expect(r.out).toBe("");
     failureLine(r);
   });
@@ -587,7 +590,7 @@ describe(`starter contract: environment and errors [${STARTER}]`, () => {
     const server = await realServer();
     const sb = await sandbox({ mirror: server.url });
     const r = await starter(sb, []);
-    expect(r.code).toBe(1);
+    expectExit(r, 1);
     expect(r.out).toBe("");
     failureLine(r);
   });
@@ -599,7 +602,7 @@ describe(`starter contract: environment and errors [${STARTER}]`, () => {
     const sb = await sandbox({ mirror: dead });
     const st = await status(sb);
     const r = await starter(sb, ["ensure"], { timeoutMs: 120_000 });
-    expect(r.code).toBe(1);
+    expectExit(r, 1);
     expect(r.out).toBe("");
     failureLine(r);
     expect(await exists(st.slot)).toBe(false);
@@ -611,7 +614,7 @@ describe(`starter contract: environment and errors [${STARTER}]`, () => {
     const sb = await sandbox({ mirror: server.url });
     const st = await status(sb);
     const r = await starter(sb, ["ensure"]);
-    expect(r.code).toBe(1);
+    expectExit(r, 1);
     expect(failureLine(r)).toContain("getty-bun: ");
     expect(server.archives()).toBeGreaterThanOrEqual(1);
     expect(await exists(st.slot)).toBe(false);
@@ -638,7 +641,7 @@ describe(`interface details (docs/plan.md, bootstrap/README.md) [${STARTER}]`, (
     }
     for (const args of [["status"], ["ensure"], ["run", "entries/info.ts"]]) {
       const r = await starter(sb, args, { env });
-      expect(r.code).toBe(1);
+      expectExit(r, 1);
       expect(r.out).toBe("");
       expect(failureLine(r)).toMatch(named);
     }
@@ -652,7 +655,7 @@ describe(`interface details (docs/plan.md, bootstrap/README.md) [${STARTER}]`, (
       const server = await realServer();
       const sb = await sandbox({ mirror: server.url });
       const r = await starter(sb, ["ensure"], { env: { GETTY_BUN_LOCK_WAIT: v } });
-      expect(r.code).toBe(1);
+      expectExit(r, 1);
       expect(r.out).toBe("");
       expect(failureLine(r)).toContain("GETTY_BUN_LOCK_WAIT");
       expect(server.total()).toBe(0);
@@ -661,12 +664,14 @@ describe(`interface details (docs/plan.md, bootstrap/README.md) [${STARTER}]`, (
   }
 
   if (!IS_WIN) {
+    // POSIX only: the default home on Windows comes from the user profile API, which ignores a
+    // changed USERPROFILE, so the harness refuses to run a Windows starter without GETTY_HOME.
     test("an empty GETTY_HOME fails with exit 1 naming the variable; nothing is created", async () => {
       const server = await realServer();
       const sb = await sandbox({ mirror: server.url });
       for (const args of [["status"], ["ensure"]]) {
         const r = await starter(sb, args, { env: { GETTY_HOME: "" } });
-        expect(r.code).toBe(1);
+        expectExit(r, 1);
         expect(r.out).toBe("");
         expect(failureLine(r)).toContain("GETTY_HOME");
       }
@@ -677,6 +682,7 @@ describe(`interface details (docs/plan.md, bootstrap/README.md) [${STARTER}]`, (
   }
 
   const breakers: Array<[string, (bun: string) => Promise<void>]> = [["is missing", (bun) => rm(bun)]];
+  breakers.push(["is empty (0 bytes)", (bun) => writeFile(bun, new Uint8Array())]);
   if (!IS_WIN) breakers.push(["is not executable", (bun) => chmod(bun, 0o644)]);
   for (const [what, breakIt] of breakers) {
     test(`a slot whose bin/bun ${what} is mismatch: ensure and run exit 1 naming the slot, slot untouched`, async () => {
@@ -688,11 +694,11 @@ describe(`interface details (docs/plan.md, bootstrap/README.md) [${STARTER}]`, (
       const requests = server.total();
 
       const s = await starter(sb, ["status"]);
-      expect(s.code).toBe(0);
+      expectExit(s, 0);
       expect(JSON.parse(s.out).state).toBe("mismatch");
       for (const args of [["ensure"], ["run", "entries/info.ts"]]) {
         const r = await starter(sb, args);
-        expect(r.code).toBe(1);
+        expectExit(r, 1);
         expect(r.out).toBe("");
         expect(failureLine(r)).toContain(st.slot);
       }
@@ -755,7 +761,7 @@ describe(`interface details (docs/plan.md, bootstrap/README.md) [${STARTER}]`, (
     const rec = JSON.parse(await readFile(installing, "utf8"));
 
     const waiter = await starter(sb, ["ensure"], { env: { GETTY_BUN_LOCK_WAIT: "1" } });
-    expect(waiter.code).toBe(1);
+    expectExit(waiter, 1);
     expect(failureLine(waiter)).toContain(installing);
 
     expect(Object.keys(rec)).toEqual([
@@ -781,7 +787,7 @@ describe(`interface details (docs/plan.md, bootstrap/README.md) [${STARTER}]`, (
 
     expect(await holder.exited).toBe(0);
     expect(await holderErr).toBe("");
-    expect(await exists(installing)).toBe(false); // removed before the lock is released
+    expect(await exists(installing)).toBe(false); // gone once the install has ended (the order against the lock release is not observed)
     expect(await exists(lockFile(sb, REAL_VERSION, st.target))).toBe(true); // the lock file stays
     expect((await status(sb)).state).toBe("ready");
   });
@@ -791,7 +797,7 @@ describe(`interface details (docs/plan.md, bootstrap/README.md) [${STARTER}]`, (
     const sb = await sandbox({ mirror: server.url });
     const args = ["plain", "with space", 'say "hi"', "trailing\\", "\u00e4\u00df\u65e5"];
     const r = await starter(sb, ["run", "entries/info.ts", ...args]); // installs, then runs
-    expect(r.code).toBe(0);
+    expectExit(r, 0);
     expect(server.archives()).toBe(1);
     expect(JSON.parse(r.out).argv).toEqual(args);
   });
@@ -810,11 +816,11 @@ describe(`real download [${STARTER}]`, () => {
     const st = await status(sb);
     expect(st.state).toBe("missing");
     const e = await starter(sb, ["ensure"], { timeoutMs: 280_000 });
-    expect(e.code).toBe(0);
+    expectExit(e, 0);
     expect(e.out).toBe("");
     expect((await status(sb)).state).toBe("ready");
     const r = await starter(sb, ["run", "entries/echo.ts", "3"], { stdin: "real\n" });
-    expect(r.code).toBe(3);
+    expectExit(r, 3);
     expect(r.out).toBe("real\n");
     expect(await stagingLeft(sb)).toEqual([]);
   });

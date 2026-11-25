@@ -46,9 +46,45 @@ jobs:
           bun --version
           if [ "$RUNNER_OS" = Windows ]; then
             bash --version | head -n 1
-            powershell.exe -NoLogo -NoProfile -Command '$PSVersionTable | Format-List | Out-String'
-            pwsh -NoLogo -NoProfile -Command '$PSVersionTable | Format-List | Out-String'
           fi
+      - name: Windows environment (PowerShell 5.1)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $PSVersionTable | Format-List | Out-String
+          "console input encoding : $([Console]::InputEncoding.WebName) (cp $([Console]::InputEncoding.CodePage))"
+          "console output encoding: $([Console]::OutputEncoding.WebName) (cp $([Console]::OutputEncoding.CodePage))"
+          "OutputEncoding variable: $($OutputEncoding.WebName)"
+          "LanguageMode           : $($ExecutionContext.SessionState.LanguageMode)"
+          try {
+            $mp = Get-MpComputerStatus -ErrorAction Stop
+            "Defender real-time     : $($mp.RealTimeProtectionEnabled)"
+          } catch { }
+      - name: Windows environment (PowerShell 7)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $PSVersionTable | Format-List | Out-String
+          "console input encoding : $([Console]::InputEncoding.WebName) (cp $([Console]::InputEncoding.CodePage))"
+          "console output encoding: $([Console]::OutputEncoding.WebName) (cp $([Console]::OutputEncoding.CodePage))"
+          "OutputEncoding variable: $($OutputEncoding.WebName)"
+          "LanguageMode           : $($ExecutionContext.SessionState.LanguageMode)"
+          try {
+            $mp = Get-MpComputerStatus -ErrorAction Stop
+            "Defender real-time     : $($mp.RealTimeProtectionEnabled)"
+          } catch { }
+      - name: Parse getty-bun.ps1 with Windows PowerShell 5.1
+        if: runner.os == 'Windows' && matrix.starter == 'powershell'
+        shell: powershell
+        run: |
+          $errors = $null
+          $tokens = $null
+          $null = [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'bootstrap/getty-bun.ps1').Path, [ref]$tokens, [ref]$errors)
+          if ($errors -and $errors.Count -gt 0) {
+            foreach ($e in $errors) { "$($e.Extent.StartLineNumber):$($e.Extent.StartColumnNumber): $($e.Message)" }
+            exit 1
+          }
+          "no parse errors under PowerShell $($PSVersionTable.PSVersion)"
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .dev/fixtures
@@ -161,4 +197,4 @@ jobs:
             echo "### Per-hook cost: ${{ matrix.name }} (${{ matrix.os }})"
             echo
             bun bootstrap/test/measure-hook.ts
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY"

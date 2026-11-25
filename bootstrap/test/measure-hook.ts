@@ -59,22 +59,47 @@ try {
     await timed("bare Bun (slot Bun, same entry, no starter)", [slotBun(st.slot), "--no-install", entry]),
     await timed((STARTER === "sh" ? "direct exec: sh starter `run` (fast path)" : `direct exec form: ${STARTER} -File starter \`run\` (fast path)`), starterCmd(sb.root, ["run", "entries/hook.ts"])),
   ];
+  // Codex runs commandWindows in its session shell, `powershell -NoProfile -Command <line>`
+  // (source-checked openai/codex 3f65e9f): two PowerShell starts per hook. This row is
+  // evidence for that, never a failure: exit codes, bytes and timeouts are recorded as data.
+  interface Seen {
+    ms: number;
+    code: number | null;
+    timedOut: boolean;
+    out: string;
+    err: string;
+  }
+  const nested: Seen[] = [];
+  let directOut = "";
   if (STARTER !== "sh") {
-    // Codex runs commandWindows in its session shell, `powershell -NoProfile -Command <line>`
-    // (source-checked openai/codex 3f65e9f): two PowerShell starts per hook.
     const line = starterCmd(sb.root, ["run", "entries/hook.ts"])
       .map((a) => (/[\s"]/.test(a) ? `"${a}"` : a))
       .join(" ");
-    rows.push(
-      await timed(`Codex nesting: powershell -NoProfile -Command "<${STARTER} -File starter run>"`, [
-        "powershell",
-        "-NoProfile",
-        "-Command",
-        line,
-      ]),
-    );
+    const direct = await run(starterCmd(sb.root, ["run", "entries/hook.ts"]), {
+      env: sb.env, cwd: sb.cwd, stdin, timeoutMs: 60_000,
+    });
+    directOut = direct.out;
+    for (let i = 0; i < n; i++) {
+      try {
+        const r = await run(["powershell", "-NoProfile", "-Command", line], {
+          env: sb.env, cwd: sb.cwd, stdin, timeoutMs: 30_000,
+        });
+        nested.push({ ms: r.ms, code: r.code, timedOut: r.timedOut, out: r.out, err: r.err });
+        if (r.timedOut && nested.filter((x) => x.timedOut).length >= 2) break; // enough evidence
+      } catch (e) {
+        nested.push({ ms: 0, code: null, timedOut: false, out: "", err: `spawn failed: ${e}` });
+        break;
+      }
+    }
+    const done = nested.filter((x) => !x.timedOut && x.code !== null).map((x) => x.ms).sort((a, b) => a - b);
+    rows.push({
+      label: `Codex nesting: powershell -NoProfile -Command "<${STARTER} -File starter run>" (completed runs only)`,
+      median: done.length ? done[done.length >> 1]! : NaN,
+      min: done.length ? done[0]! : NaN,
+      max: done.length ? done[done.length - 1]! : NaN,
+    });
   }
-  const f = (x: number) => x.toFixed(0);
+  const f = (x: number) => (Number.isNaN(x) ? "n/a" : x.toFixed(0));
   console.log(`### Per-hook cost: ${STARTER} on ${process.platform}/${process.arch}, N = ${n}`);
   console.log("");
   console.log("| What | median ms | min ms | max ms |");
@@ -82,6 +107,21 @@ try {
   for (const r of rows) console.log(`| ${r.label} | ${f(r.median)} | ${f(r.min)} | ${f(r.max)} |`);
   console.log("");
   const over = rows[2]!.median - rows[1]!.median;
+  if (STARTER !== "sh") {
+    const esc = (t: string) => JSON.stringify(t).replace(/\|/g, "\\|");
+    console.log("#### Codex nesting, recorded as data (not a pass or fail)");
+    console.log("");
+    console.log("| run | exit code | timed out | stdout equals the direct form | stdout (JSON-escaped) | stderr (JSON-escaped) |");
+    console.log("|---:|---:|---|---|---|---|");
+    nested.forEach((r, i) =>
+      console.log(
+        `| ${i + 1} | ${r.code ?? "none"} | ${r.timedOut} | ${r.out === directOut} | ${esc(r.out)} | ${esc(r.err.slice(0, 200))} |`,
+      ),
+    );
+    console.log("");
+    console.log(`Direct form stdout: ${esc(directOut)}`);
+    console.log("");
+  }
   console.log(`Starter overhead over the bare Bun: ${f(over)} ms median (target ${st.target}${IS_WIN ? ", Windows" : ""}).`);
 } finally {
   server.stop();

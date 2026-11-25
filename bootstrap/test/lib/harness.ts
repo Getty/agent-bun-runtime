@@ -10,12 +10,11 @@ import {
   mkdtemp,
   readdir,
   readFile,
-  realpath,
   rm,
   stat,
   writeFile,
 } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { archiveInfo, loadRealTable, tableWith, type Table } from "./table";
@@ -228,7 +227,7 @@ process.stdout.write(JSON.stringify({ ok: true, event: input.event ?? null }));
 `;
 
 export async function sandbox(opts: SandboxOptions = {}): Promise<Sandbox> {
-  const tmp = await realpath(await mkdtemp(join(tmpdir(), "getty-bun-test-")));
+  const tmp = realpathSync.native(await mkdtemp(join(tmpdir(), "getty-bun-test-"))); // long names, not RUNNER~1
   track(() => rmTree(tmp));
   const home = join(tmp, opts.homeName ?? "getty-home");
   const userHome = join(tmp, "user-home");
@@ -379,6 +378,29 @@ export function starterCmd(root: string, args: string[], kind: StarterKind = STA
   ];
 }
 
+/**
+ * Compare two paths as the file system sees them: long names (not 8.3 short names),
+ * canonical case, separators. A path that does not exist yet is resolved through its
+ * nearest existing ancestor.
+ */
+export function canonPath(p: string): string {
+  const tail: string[] = [];
+  let cur = p;
+  for (;;) {
+    try {
+      const real = realpathSync.native(cur);
+      const full = tail.length ? join(real, ...tail.reverse()) : real;
+      return IS_WIN ? full.replace(/\//g, "\\").toLowerCase() : full;
+    } catch {
+      const up = dirname(cur);
+      if (up === cur) return IS_WIN ? p.replace(/\//g, "\\").toLowerCase() : p;
+      tail.push(cur.slice(up.length).replace(/^[\\/]+/, ""));
+      cur = up;
+    }
+  }
+}
+export const samePath = (a: string, b: string) => canonPath(a) === canonPath(b);
+
 export interface StarterOptions {
   stdin?: Uint8Array | string;
   /** extra environment; a null value removes the variable */
@@ -396,6 +418,12 @@ export async function starter(sb: Sandbox, args: string[], o: StarterOptions = {
   for (const [k, v] of Object.entries(o.env ?? {})) {
     if (v === null) delete env[k];
     else env[k] = v;
+  }
+  // On Windows the PowerShell starter's default home comes from the user profile API, which
+  // does not follow a changed USERPROFILE: without GETTY_HOME a test would write to the
+  // real profile's .getty. Refuse to spawn.
+  if (IS_WIN && !env.GETTY_HOME) {
+    throw new Error("refusing to run a starter on Windows without GETTY_HOME (it would touch the real ~/.getty)");
   }
   const r = await run(starterCmd(sb.root, args, o.kind), {
     env,
@@ -486,6 +514,13 @@ export async function publishedTargets(sb: Sandbox, version: string): Promise<st
 
 export function lines(s: string): string[] {
   return s.split(/\r?\n/).filter((l) => l !== "");
+}
+
+/** Assert an exit code; a failure carries the stderr, so a CI log says why. */
+export function expectExit(r: { code: number | null; err: string }, want: number): void {
+  if (r.code !== want) {
+    throw new Error(`expected exit ${want}, got ${r.code}; stderr: ${JSON.stringify(r.err)}`);
+  }
 }
 
 /** The failure contract of a starter: one stderr line `getty-bun: ...`, exit 1. */

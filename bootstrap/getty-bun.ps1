@@ -27,21 +27,24 @@ $ProgressPreference = 'SilentlyContinue'
 
 # A starter failure: the main body prints the message as one "getty-bun: " line, exit 1.
 function Fail([string]$Message) {
-    $e = New-Object System.Exception $Message
+    $e = [System.Exception]::new($Message)
     $e.Data['getty-bun'] = $true
     throw $e
 }
 
-# The .NET exception behind PowerShell's wrappers (MethodInvocationException and kin).
+# The .NET exception behind PowerShell's wrappers (MethodInvocationException and kin) and
+# a task's AggregateException.
 function Get-Cause($Exception) {
     $e = $Exception
-    while ($e -is [System.Management.Automation.RuntimeException] -and $null -ne $e.InnerException) { $e = $e.InnerException }
+    while (($e -is [System.Management.Automation.RuntimeException] -or $e -is [System.AggregateException]) -and $null -ne $e.InnerException) {
+        $e = $e.InnerException
+    }
     $e
 }
 
 # One line as UTF-8 bytes with LF on a standard stream, independent of the console code page.
 function Write-Bytes([System.IO.Stream]$Stream, [string]$Text) {
-    $bytes = (New-Object System.Text.UTF8Encoding $false).GetBytes($Text + "`n")
+    $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($Text + "`n")
     $Stream.Write($bytes, 0, $bytes.Length)
     $Stream.Flush()
 }
@@ -69,7 +72,7 @@ function Get-GettyHome {
         return [System.IO.Path]::Combine($userProfile, '.getty')
     }
     if (-not (Test-AbsolutePath $h)) { Fail ("GETTY_HOME must be an absolute path, got '" + $h + "'") }
-    if ($h.IndexOfAny([char[]](0..31)) -ge 0) { Fail 'GETTY_HOME contains control characters' }
+    if ($h.IndexOfAny([char[]]((0..31) + 127)) -ge 0) { Fail 'GETTY_HOME contains control characters' }
     while ($h.Length -gt 3 -and ($h.EndsWith('\', [System.StringComparison]::Ordinal) -or $h.EndsWith('/', [System.StringComparison]::Ordinal))) {
         $h = $h.Substring(0, $h.Length - 1)
     }
@@ -98,17 +101,44 @@ function Assert-Architecture {
     Fail ('unsupported target windows-' + $arch.ToLowerInvariant() + ' (PROCESSOR_ARCHITECTURE ' + $arch + ')' + $supported)
 }
 
-# PF_AVX2_INSTRUCTIONS_AVAILABLE (40); false whenever the probe cannot run (Constrained
-# Language Mode, no compiler, an old Windows). Add-Type compiles: install and status only.
-function Test-Avx2 {
+# kernel32 through Add-Type, which compiles: install and status only, never the fast path.
+# False when it cannot load (Constrained Language Mode, no compiler).
+function Initialize-Kernel32 {
     try {
-        if ($null -eq ('GettyBun.Cpu' -as [type])) {
-            Add-Type -Namespace GettyBun -Name Cpu -MemberDefinition '[DllImport("kernel32.dll")] public static extern bool IsProcessorFeaturePresent(uint feature);'
+        if ($null -eq ('GettyBun.Kernel32' -as [type])) {
+            Add-Type -Namespace GettyBun -Name Kernel32 -MemberDefinition ('[DllImport("kernel32.dll")] public static extern bool IsProcessorFeaturePresent(uint feature); ' +
+                '[DllImport("kernel32.dll")] public static extern uint SetErrorMode(uint mode);')
         }
-        return [bool]([GettyBun.Cpu]::IsProcessorFeaturePresent(40))
+        return $true
     } catch {
         return $false
     }
+}
+
+# PF_AVX2_INSTRUCTIONS_AVAILABLE (40); false whenever the probe cannot run (see
+# Initialize-Kernel32, an old Windows).
+function Test-Avx2 {
+    if (-not (Initialize-Kernel32)) { return $false }
+    try { return [bool]([GettyBun.Kernel32]::IsProcessorFeaturePresent(40)) } catch { return $false }
+}
+
+# SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX added to the process error mode, which
+# child processes inherit: a probe that crashes ends without a Windows Error Reporting
+# dialog while the install lock is held. Returns the previous mode, or nothing.
+function Set-ProbeErrorMode {
+    if (-not (Initialize-Kernel32)) { return }
+    try {
+        $old = [GettyBun.Kernel32]::SetErrorMode(3)
+        $null = [GettyBun.Kernel32]::SetErrorMode($old -bor 3)
+        return $old
+    } catch {
+        return
+    }
+}
+
+function Restore-ErrorMode($Mode) {
+    if ($null -eq $Mode) { return }
+    try { $null = [GettyBun.Kernel32]::SetErrorMode($Mode) } catch { }
 }
 
 function Get-InstallTarget {
@@ -147,8 +177,8 @@ function Get-PinTarget($Pin, [string]$Target) {
 # --- slot --------------------------------------------------------------------------
 
 # ready: the receipt's first three lines name this pin's version and the target and
-# bin\bun.exe exists; missing: no slot; mismatch: anything else. No JSON parse, no hashing,
-# no Bun start.
+# bin\bun.exe is a non-empty file; missing: no slot; mismatch: anything else. No JSON
+# parse, no hashing, no Bun start.
 function Get-SlotState([string]$Slot, [string]$Version, [string]$Target) {
     if (-not [System.IO.Directory]::Exists($Slot)) {
         if ([System.IO.File]::Exists($Slot)) { return 'mismatch' }
@@ -156,9 +186,9 @@ function Get-SlotState([string]$Slot, [string]$Version, [string]$Target) {
         return 'mismatch' # a dangling link or junction
     }
     $receipt = [System.IO.Path]::Combine($Slot, 'receipt.json')
-    if (-not [System.IO.File]::Exists($receipt) -or -not [System.IO.File]::Exists([System.IO.Path]::Combine($Slot, 'bin', 'bun.exe'))) {
-        return 'mismatch'
-    }
+    $exe = [System.IO.Path]::Combine($Slot, 'bin', 'bun.exe')
+    if (-not [System.IO.File]::Exists($receipt) -or -not [System.IO.File]::Exists($exe)) { return 'mismatch' }
+    try { if ([System.IO.FileInfo]::new($exe).Length -eq 0) { return 'mismatch' } } catch { return 'mismatch' }
     # The bytes as they are (Latin-1: no BOM skipped, no decoding); three whole LF lines, as
     # getty-bun.sh reads them (a CRLF receipt is a mismatch there too).
     try { $text = [System.Text.Encoding]::GetEncoding(28591).GetString([System.IO.File]::ReadAllBytes($receipt)) } catch { return 'mismatch' }
@@ -170,15 +200,16 @@ function Get-SlotState([string]$Slot, [string]$Version, [string]$Target) {
     'mismatch'
 }
 
-# The fast path: the first ready slot of windows-x64 and windows-x64-baseline, without
-# AVX2 detection (an x64 install that died with an illegal instruction left a baseline slot).
-function Find-ReadySlot([string]$BunDir, $Pin) {
+# The fast path, without AVX2 detection: the first slot of windows-x64 and
+# windows-x64-baseline that exists (an x64 install that died with an illegal instruction
+# left only a baseline slot), with its state. A mismatching windows-x64 slot is the answer,
+# never skipped for a ready baseline one. Nothing when neither exists.
+function Find-Slot([string]$BunDir, $Pin) {
     foreach ($target in 'windows-x64', 'windows-x64-baseline') {
         if (-not $Pin.targets.ContainsKey($target)) { continue }
         $slot = [System.IO.Path]::Combine($BunDir, $Pin.version, $target)
-        if ((Get-SlotState $slot $Pin.version $target) -ceq 'ready') {
-            return @{ target = $target; slot = $slot }
-        }
+        $state = Get-SlotState $slot $Pin.version $target
+        if ($state -cne 'missing') { return @{ target = $target; slot = $slot; state = $state } }
     }
 }
 
@@ -212,8 +243,14 @@ function Enter-Lock([string]$Path, [int]$WaitSeconds) {
         try {
             return [System.IO.File]::Open($Path, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
         } catch {
+            # Held means a sharing or lock violation (0x80070020, 0x80070021); any other
+            # failure is one. .NET on Linux reports a held lock as EWOULDBLOCK (11): pwsh test
+            # runs only.
             $cause = Get-Cause $_.Exception
-            if ($cause.GetType() -ne [System.IO.IOException]) { Fail ('cannot open the lock file ' + $Path + ': ' + $cause.Message) }
+            $code = $cause.HResult
+            $held = $cause -is [System.IO.IOException] -and ($code -eq -2147024864 -or $code -eq -2147024863 -or
+                ($code -eq 11 -and [System.IO.Path]::DirectorySeparatorChar -ceq '/'))
+            if (-not $held) { Fail ('cannot open the lock file ' + $Path + ': ' + $cause.Message) }
         }
         if ([DateTime]::UtcNow -ge $deadline) { return }
         Start-Sleep -Milliseconds 200
@@ -267,22 +304,78 @@ function Remove-Installing([string]$Path) {
     }
 }
 
-function Save-Archive([string]$Url, [string]$Path) {
+# The archive, bounded like getty-bun.sh's curl (--speed-limit 1024 --speed-time 60): no
+# response within 60 s, or less than 60 KiB in a 60 s window, aborts the download (tests
+# pass a shorter window). Each read is waited for by the starter, not by ReadWriteTimeout
+# (not honored on every .NET).
+function Save-Archive([string]$Url, [string]$Path, [int]$WindowSeconds = 60) {
     [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
-    $client = New-Object System.Net.WebClient
+    $windowMs = $WindowSeconds * 1000
+    $minBytes = 1024 * $WindowSeconds
+    $slow = 'download of ' + $Url + ' failed: less than ' + $WindowSeconds + ' KiB in ' + $WindowSeconds + ' s (below 1 KiB/s)'
+    $request = $null
+    $response = $null
+    $body = $null
+    $file = $null
+    $done = $false
     try {
-        $client.Headers.Add('User-Agent', 'getty-bun')
-        $client.DownloadFile($Url, $Path)
+        $request = [System.Net.WebRequest]::Create($Url)
+        $request.UserAgent = 'getty-bun'
+        $request.Timeout = $windowMs
+        $request.ReadWriteTimeout = $windowMs
+        $response = $request.GetResponse()
+        $body = $response.GetResponseStream()
+        $file = [System.IO.File]::Create($Path)
+        $buffer = [byte[]]::new(65536)
+        $clock = [System.Diagnostics.Stopwatch]::StartNew()
+        $windowBytes = 0
+        while ($true) {
+            $read = $body.ReadAsync($buffer, 0, $buffer.Length)
+            while (-not $read.Wait([int][Math]::Max(0, $windowMs - $clock.ElapsedMilliseconds))) {
+                if ($windowBytes -lt $minBytes) { Fail $slow }
+                $windowBytes = 0
+                $clock.Restart()
+            }
+            $n = $read.Result
+            if ($n -le 0) { break }
+            $file.Write($buffer, 0, $n)
+            $windowBytes += $n
+            if ($clock.ElapsedMilliseconds -ge $windowMs) {
+                if ($windowBytes -lt $minBytes) { Fail $slow }
+                $windowBytes = 0
+                $clock.Restart()
+            }
+        }
+        $file.Flush()
+        $done = $true
     } catch {
-        Fail ('download of ' + $Url + ' failed: ' + (Get-Cause $_.Exception).Message)
+        $cause = Get-Cause $_.Exception
+        if ($cause.Data.Contains('getty-bun')) { throw }
+        Fail ('download of ' + $Url + ' failed: ' + $cause.Message)
     } finally {
-        $client.Dispose()
+        # Abort first: closing a response with unread data may wait for the rest of it.
+        if (-not $done -and $null -ne $request) { try { $request.Abort() } catch { } }
+        if ($null -ne $file) { Close-Quietly $file }
+        if ($null -ne $body) { Close-Quietly $body }
+        if ($null -ne $response) { Close-Quietly $response }
     }
 }
 
+# SHA256 through .NET: Get-FileHash on 5.1 is a script function that ignores this
+# script's ErrorActionPreference.
 function Get-Sha256([string]$Path) {
-    try { (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() }
-    catch { Fail ('cannot compute the SHA256 of ' + $Path + ': ' + (Get-Cause $_.Exception).Message) }
+    $sha = $null
+    $file = $null
+    try {
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        $file = [System.IO.File]::OpenRead($Path)
+        [System.BitConverter]::ToString($sha.ComputeHash($file)).Replace('-', '').ToLowerInvariant()
+    } catch {
+        Fail ('cannot compute the SHA256 of ' + $Path + ': ' + (Get-Cause $_.Exception).Message)
+    } finally {
+        if ($null -ne $file) { Close-Quietly $file }
+        if ($null -ne $sha) { Close-Quietly $sha }
+    }
 }
 
 # The archive holds exactly the member plus directory entries of its parents; extracts
@@ -312,9 +405,11 @@ function Expand-Member([string]$Zip, [string]$Member, [string]$Destination, [str
 }
 
 # bun --version with its own empty stdin (never the host's input) and its stderr discarded
-# (the starter's stderr carries one getty-bun line at most), as getty-bun.sh does.
-function Invoke-Probe([string]$Exe) {
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
+# (the starter's stderr carries one getty-bun line at most), as getty-bun.sh does. Bounded,
+# since the install lock is held: a probe still running after $TimeoutSeconds is killed
+# through its process handle.
+function Invoke-Probe([string]$Exe, [int]$TimeoutSeconds = 60) {
+    $psi = [System.Diagnostics.ProcessStartInfo]::new()
     $psi.FileName = $Exe
     $psi.Arguments = '--version'
     $psi.UseShellExecute = $false
@@ -323,28 +418,35 @@ function Invoke-Probe([string]$Exe) {
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
     try { $p = [System.Diagnostics.Process]::Start($psi) }
-    catch { return @{ code = $null; text = ''; error = (Get-Cause $_.Exception).Message } }
+    catch { return @{ code = $null; text = ''; error = (Get-Cause $_.Exception).Message; timedOut = $false } }
     try {
         Close-Quietly $p.StandardInput
         $null = $p.StandardError.ReadToEndAsync()
-        $text = $p.StandardOutput.ReadToEnd()
+        $text = $p.StandardOutput.ReadToEndAsync()
+        if (-not $p.WaitForExit($TimeoutSeconds * 1000) -or -not $text.Wait(5000)) {
+            try { $p.Kill() } catch { }
+            $null = $p.WaitForExit(5000)
+            return @{ code = $null; text = ''; error = ('did not finish within ' + $TimeoutSeconds + ' s and was stopped'); timedOut = $true }
+        }
         $p.WaitForExit()
-        @{ code = $p.ExitCode; text = $text.Trim(); error = $null }
+        @{ code = $p.ExitCode; text = $text.Result.Trim(); error = $null; timedOut = $false }
     } finally {
         $p.Dispose()
     }
 }
 
 # The --version probe, retried once after about 1 s when Bun does not start or fails
-# (antivirus may hold a fresh exe). result: ok, illegal-instruction, fails or version.
+# (antivirus may hold a fresh exe), never after a timeout. result: ok, illegal-instruction,
+# fails or version.
 function Test-Bun([string]$Exe, [string]$Version) {
     $illegalInstruction = -1073741795 # STATUS_ILLEGAL_INSTRUCTION, 0xC000001D
     $r = Invoke-Probe $Exe
-    if ($r.code -ne 0 -and $r.code -ne $illegalInstruction) {
+    if (-not $r.timedOut -and $r.code -ne 0 -and $r.code -ne $illegalInstruction) {
         Start-Sleep -Seconds 1
         $r = Invoke-Probe $Exe
     }
     if ($r.code -eq $illegalInstruction) { return @{ result = 'illegal-instruction'; detail = 'illegal instruction, STATUS_ILLEGAL_INSTRUCTION' } }
+    if ($r.timedOut) { return @{ result = 'fails'; detail = ($Exe + ' --version ' + $r.error) } }
     if ($null -ne $r.error) { return @{ result = 'fails'; detail = ($Exe + ' --version could not start: ' + $r.error) } }
     if ($r.code -ne 0) { return @{ result = 'fails'; detail = ($Exe + ' --version exited with ' + $r.code) } }
     if ($r.text -cne $Version) { return @{ result = 'version'; detail = $r.text } }
@@ -477,10 +579,15 @@ function Install-Target($Pin, [string]$BunDir, [string]$Target, [int]$WaitSecond
 function Install-Pinned($Pin, [string]$BunDir) {
     $wait = Get-LockWait
     $target = Get-InstallTarget
-    $result = Install-Target $Pin $BunDir $target $wait
-    if ($result -ceq 'illegal-instruction' -and $target -ceq 'windows-x64') {
-        $target = 'windows-x64-baseline'
+    $errorMode = Set-ProbeErrorMode # restored before the entry starts
+    try {
         $result = Install-Target $Pin $BunDir $target $wait
+        if ($result -ceq 'illegal-instruction' -and $target -ceq 'windows-x64') {
+            $target = 'windows-x64-baseline'
+            $result = Install-Target $Pin $BunDir $target $wait
+        }
+    } finally {
+        Restore-ErrorMode $errorMode
     }
     if ($result -ceq 'illegal-instruction') {
         Fail ('the Bun for ' + $target + ' does not run on this CPU (illegal instruction, STATUS_ILLEGAL_INSTRUCTION); nothing was published')
@@ -495,7 +602,7 @@ function Install-Pinned($Pin, [string]$BunDir) {
 function ConvertTo-CommandLine([string[]]$Arguments) {
     $backslash = [char]92
     $quote = [char]34
-    $line = New-Object System.Text.StringBuilder
+    $line = [System.Text.StringBuilder]::new()
     foreach ($argument in $Arguments) {
         if ($line.Length -gt 0) { $null = $line.Append([char]32) }
         if ($argument.Length -gt 0 -and $argument.IndexOfAny([char[]](9, 10, 11, 32, 34)) -lt 0) {
@@ -529,9 +636,9 @@ function Invoke-Bun([string]$Exe, [string[]]$Arguments) {
     # with the UTF-8 code page that is a BOM in front of the hook's input.
     $inputEncoding = [Console]::InputEncoding
     if ($inputEncoding.CodePage -eq 65001 -and $inputEncoding.GetPreamble().Length -gt 0) {
-        try { [Console]::InputEncoding = New-Object System.Text.UTF8Encoding $false } catch { }
+        try { [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { }
     }
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi = [System.Diagnostics.ProcessStartInfo]::new()
     $psi.FileName = $Exe
     $psi.Arguments = ConvertTo-CommandLine $Arguments
     $psi.UseShellExecute = $false
@@ -545,7 +652,7 @@ function Invoke-Bun([string]$Exe, [string[]]$Arguments) {
     if ($toChild -is [System.IO.FileStream]) {
         # Process buffers its stdin FileStream (4096 bytes) and CopyToAsync never flushes:
         # write unbuffered, so input reaches Bun while the host keeps stdin open.
-        $toChild = New-Object System.IO.FileStream($toChild.SafeFileHandle, [System.IO.FileAccess]::Write, 1)
+        $toChild = [System.IO.FileStream]::new($toChild.SafeFileHandle, [System.IO.FileAccess]::Write, 1)
     }
     $fromChild = $child.StandardOutput.BaseStream
     $stdout = [Console]::OpenStandardOutput()
@@ -591,13 +698,13 @@ function Invoke-GettyBun([string]$ScriptPath, [string[]]$Argv) {
     Assert-Architecture
     $pin = Read-Pin $ScriptPath
     $bunDir = [System.IO.Path]::Combine($gettyHome, 'runtimes', 'bun')
-    $found = Find-ReadySlot $bunDir $pin
+    $found = Find-Slot $bunDir $pin
 
     if ($command -ceq 'status') {
         if ($null -ne $found) {
             $target = $found.target
             $slot = $found.slot
-            $state = 'ready'
+            $state = $found.state
         } else {
             $target = Get-InstallTarget
             $null = Get-PinTarget $pin $target
@@ -608,7 +715,11 @@ function Invoke-GettyBun([string]$ScriptPath, [string[]]$Argv) {
             ',"slot":' + (ConvertTo-JsonString $slot) + ',"state":' + (ConvertTo-JsonString $state) + '}')
         return 0
     }
-    if ($null -eq $found) { $found = Install-Pinned $pin $bunDir }
+    if ($null -eq $found) {
+        $found = Install-Pinned $pin $bunDir
+    } elseif ($found.state -cne 'ready') {
+        Fail-Mismatch $found.slot $pin.version $found.target
+    }
     if ($command -ceq 'ensure') { return 0 }
 
     # run: the consumer root is the parent of this starter's directory, never the cwd.

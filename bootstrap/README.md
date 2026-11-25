@@ -374,3 +374,87 @@ change the download; a proxy comes from the usual environment variables (`https_
 `no_proxy`). A missing tool fails before anything is written, with one `getty-bun: `
 line naming it; a tool of the wrong kind fails at the step that uses it, also with one
 line.
+
+## Windows starter
+
+`getty-bun.ps1` runs under Windows PowerShell 5.1 and PowerShell 7, started as
+
+```
+powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File <root>\bootstrap\getty-bun.ps1 <command> [args...]
+```
+
+It keeps the POSIX starter's commands, `status` keys, exit codes and store layout; the
+file stays pure ASCII with LF line endings (5.1 reads a file without BOM in the ANSI
+code page). `GETTY_HOME` must be a drive-absolute (`C:\...`, `C:/...`) or UNC path;
+unset, it is `<user profile>\.getty`, never `$HOME` (Git Bash sets `HOME` to a
+`/c/Users/...` path). The executable is `bin\bun.exe`, the receipt's `executable` is
+`bin/bun.exe`.
+
+**Targets.** `windows-x64` when `IsProcessorFeaturePresent` reports AVX2, otherwise
+`windows-x64-baseline`; the check compiles through `Add-Type`, and where that cannot
+load (Constrained Language Mode, no compiler) the answer is `windows-x64-baseline`. An
+x64 Bun whose `--version` probe dies with `STATUS_ILLEGAL_INSTRUCTION` publishes
+nothing; the starter then installs `windows-x64-baseline` under that target's own
+lock. ARM64 fails as an unsupported target.
+
+**Fast path.** The starter takes the first slot that exists of `windows-x64`, then
+`windows-x64-baseline`, without detecting the CPU: `ready` runs it, `mismatch` fails
+closed (a damaged `windows-x64` slot is never skipped for a ready baseline slot), and
+only when neither exists does it detect the target and install. `status` reports that
+slot, or, with neither present, the detected target's. The fast path uses no `Add-Type`
+and no cmdlet from a module that 5.1 would have to load (`[type]::new()`, never
+`New-Object`); the per-hook CI job measures what that costs.
+
+**Install bounds.** The download fails when no response arrives within 60 s or less than
+60 KiB arrive in a 60 s window, the counterpart of curl's `--speed-limit 1024
+--speed-time 60`. The `--version` probe is killed through its process handle after
+60 s. During the install the process error mode includes `SEM_FAILCRITICALERRORS` and
+`SEM_NOGPFAULTERRORBOX`, which the probes inherit, so a crashing probe ends without a
+Windows Error Reporting dialog while the lock is held; the previous mode is restored
+before the entry starts. A failed probe is retried once after about 1 s (antivirus may
+hold a fresh `bun.exe`), a timed-out one is not; the rename into the slot is retried for
+about 10 s on sharing violations.
+
+**Lock and `.installing`.** `.install.lock` is opened with `FileShare.None`; a sharing
+or lock violation means held and is retried every 200 ms until `GETTY_BUN_LOCK_WAIT`
+runs out, any other error fails. The Windows values of the two OS-specific fields:
+
+| Field | Windows value |
+|---|---|
+| `processStartToken` | `"start-filetime:<n>"`: the starter process's creation time as a UTC FILETIME (100 ns intervals since 1601-01-01) |
+| `environmentId` | `"<machine>/windows/<SID>"`: the machine name and the user's SID |
+
+Either is `null` when the starter cannot read it; `processName` is `powershell` or
+`pwsh`.
+
+**`run`.** Bun starts through `System.Diagnostics.Process` with the entry's arguments
+quoted by the `CommandLineToArgvW` rules; stdin and stdout are raw byte copies, stderr
+is inherited, and the exit code is Bun's. The starter ends once Bun has ended, even when
+the host keeps stdin open.
+
+**Limit: entry arguments.** `-File` hands the arguments after the script path to
+PowerShell's own parameter binding: an entry argument shaped like `-name:value` or
+starting with `-` may be re-parsed by PowerShell (PowerShell 7 splits `-x:foo` into
+`-x` and `foo`). Entry arguments must not start with `-`.
+
+**Limit: no console of its own.** Bun starts with `CreateNoWindow`, so no console
+window opens for a hook. The trade-off: Ctrl+C in the host's console does not reach
+Bun, and Bun survives a kill of `powershell.exe`. Both are to be measured on a real host
+before phase 3a.
+
+**Git Bash, MSYS2 and Cygwin.** Under a `uname -s` of `MINGW*`, `MSYS*`, `CYGWIN*` or
+`*_NT-*`, `getty-bun.sh` forwards every call to the `getty-bun.ps1` next to it
+(`${0%.sh}.ps1`), so both starters share slot and lock. It runs Windows PowerShell
+5.1 from `$SYSTEMROOT\System32\WindowsPowerShell\v1.0\powershell.exe` (else
+`powershell.exe` or `pwsh.exe` on `PATH`) with the flags above, by `exec`, arguments
+unchanged; exit code and streams are PowerShell's. It needs `cygpath`. A `GETTY_HOME`
+starting with `/` is converted with `cygpath -w`; an empty or relative one passes
+unchanged and is rejected by `getty-bun.ps1`. A missing `getty-bun.ps1`, `cygpath` or
+PowerShell fails with one `getty-bun: ` line.
+
+**Limit: MSYS path conversion.** The forwarding sets `MSYS_NO_PATHCONV=1` and
+`MSYS2_ARG_CONV_EXCL='*'` so that the MSYS runtime does not rewrite arguments that look
+like POSIX paths. Both stay in the environment of PowerShell, Bun and the entry: an MSYS
+program the entry starts (`bash`, Git's tools) then passes POSIX paths to native
+programs unconverted. The starters leave them in place, since they cannot tell them from
+values the user set.
