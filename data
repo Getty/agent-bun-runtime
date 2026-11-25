@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-25T17:30:01Z
+id: 27
+priority: low
+status: backlog
+tags:
+- sdk
+title: 'SDK: subprocess helper with ProcessResult (handoff 7.3) when a consumer needs
+  it'
+updated: 2026-11-25T17:30:01Z
+---
+
+Found while scoping k3. The handoff (section 7.3) proposes a subprocess helper with a ProcessResult (exit code, signal, timeout, cancellation, bounded stdout/stderr). Phase 2 reads "process result" as the result main hands to the hook process (exit code plus stdout), because the plan's MVP column lists no subprocess API and briefing on Codex starts none. Build the helper when a consumer needs one (skilletor in 3b is the likely first).
