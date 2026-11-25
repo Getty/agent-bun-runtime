@@ -1,0 +1,27 @@
+---
+class: standard
+completed: 2026-11-25T11:28:55Z
+created: 2026-11-25T05:22:01Z
+depends_on:
+- 6
+id: 7
+priority: high
+started: 2026-11-25T05:37:10Z
+status: done
+tags:
+- phase-1
+- bootstrap
+- posix
+title: 'Phase 1: POSIX starter getty-bun.sh'
+updated: 2026-11-25T11:28:55Z
+---
+
+Part of k2. Lane: getty-bun-posix-worker. bootstrap/getty-bun.sh with run, ensure, status per docs/plan.md (Starter interface): target detection (avx2, baseline fallback, musl fails), flock across download, verify and publish, bounded wait, staging plus one atomic rename, receipt, fast path without network or hashing, fail closed on a mismatching slot, exit 1 never 2, stdout only for the entry. Git Bash forwarding is k9. Done: the scenario suite (k8) green for sh on Linux, shellcheck clean in CI.
+
+bootstrap/getty-bun.sh: run, ensure, status per plan and README. Lock in a brace group on fd 9, released before exec (2b proves it); per-install staging under .staging/<mktemp id>, member list checked with unzip -Z1, extract by name, bun --version equals pin, one mv publishes the slot; trap cleans staging and .installing. Receipt (documented in bootstrap/README.md) has contractVersion 1; the fast path compares the first three receipt lines. Executed: suite green under dash and busybox sh (52 pass, 2 skip, 0 fail). Git Bash forwarding is a stub function for k9. CI-only: shellcheck, aarch64, musl detection.
+
+2026-11-25 06:33 Committed in 174fc8f (branch phase-1-bootstrap, PR 1). Review findings to fix: S1 exit 2 can leak under busybox sh when bin/bun is executable but not runnable (exec ENOEXEC falls back to running it as a script); nits: tool messages before the getty-bun line on rare errors, curl/wget read user rc files, README should name util-linux flock and Info-ZIP unzip, GETTY_HOME=/ gives //runtimes.
+
+Round two: SC1007 fixed (lines 99, 137). S1: an empty bin/bun is now mismatch; an ELF check with shell builtins is not sound (read is byte-per-syscall up to byte 4240, 10-13 ms per hook, unbounded on newline-free files), so the damaged-executable limit is documented in bootstrap/README.md. Nits: tool stderr suppressed before the getty-bun line, curl -q, wget --no-config, GETTY_HOME=/ without //, README tool requirements and the SIGKILL leftover note. Executed: suite green under dash and busybox sh (62 pass, 2 skip, 0 fail). The ps1 must treat an empty bun.exe as mismatch (k9).
+
+Commits (git log 65c7dee..262bc95): 174fc8f a2c12da d822139 f12fa1d 31a10b0. Landed on main by fast-forward to 262bc95 (PR 1).
