@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-25T08:01:23Z
+id: 12
+priority: low
+status: backlog
+tags:
+- bootstrap
+- linux
+title: 'POSIX starter: fall back to linux-x64-baseline when the x64 probe dies with
+  SIGILL'
+updated: 2026-11-25T08:01:23Z
+---
+
+getty-bun.ps1 falls back from windows-x64 to windows-x64-baseline when the install probe exits with STATUS_ILLEGAL_INSTRUCTION. getty-bun.sh decides x64 vs baseline only from the avx2 flag in /proc/cpuinfo, which can be wrong under some hypervisors or masked CPUs. Then the probe dies with SIGILL (exit 132) and the install fails instead of falling back. Not in the phase 1 MVP; only do this when a user reports such a host. Scope: in the install path only, a probe exit of 132 on linux-x64 retries with linux-x64-baseline. The fast path stays as it is. Needs a scenario with a fixture binary that exits 132.
