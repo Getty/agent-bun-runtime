@@ -78,6 +78,13 @@ if (!GATE) {
   test.skip("phase 2 gate skipped: set GETTY_BUN_TEST_GATE=1 (and GETTY_BUN_TEST_STARTER) to pack, bundle and run it", () => {});
 }
 
+// What the "large" mode of the generated entry answers for the SubagentStart fixture.
+const LARGE_OUTPUT = `${JSON.stringify({
+  hookSpecificOutput: {
+    hookEventName: "SubagentStart",
+    additionalContext: "0123456789abcdef-Grüße-\n".repeat(Math.ceil((256 * 1024) / 24)),
+  },
+})}\n`;
 const bytes = async (path: string) => await Bun.file(join(FIXTURES, path)).bytes();
 const text = (b: Uint8Array) => new TextDecoder().decode(b);
 
@@ -266,9 +273,13 @@ else process.exit(code);
     }, 60_000);
   }
 
-  // Larger than a Windows pipe buffer: the entry blocks on the full pipe until the reader starts,
-  // 1.5 s after the spawn, and every byte must arrive through the starter with exit 0.
-  test("add-context of about 256 KiB read late through the starter: byte for byte, exit 0", async () => {
+  // About 256 KiB through the starter, byte for byte, exit 0. Bun.spawn drains stdout from the
+  // start, so this is not a slow reader (the sh test below is). Why it matters on Windows: inside
+  // the starter bun.exe writes into a .NET anonymous pipe that PowerShell drains with CopyToAsync
+  // (source-checked, bootstrap/getty-bun.ps1:661-664), a path the unit tests do not take. Executed:
+  // its earlier form (a 1.5 s sleep before the read) passed on both Windows gate legs of CI run
+  // 45883791115.
+  test("add-context of about 256 KiB through the starter: byte for byte, exit 0", async () => {
     const proc = Bun.spawn({
       cmd: starterCmd(sb.root, ["run", ENTRY, "large"]),
       env: sb.env,
@@ -282,19 +293,13 @@ else process.exit(code);
     try {
       proc.stdin.write(await bytes("input/subagent-start.json"));
       await proc.stdin.flush();
-      await Bun.sleep(1500);
       const stdout = new Response(proc.stdout).arrayBuffer();
       const bound = new Promise<"timeout">((resolve) => {
         timer = setTimeout(() => resolve("timeout"), 60_000);
       });
       const exited = await Promise.race([proc.exited, bound]);
       expect(exited).toBe(0);
-      const want = `${JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: "SubagentStart",
-          additionalContext: "0123456789abcdef-Grüße-\n".repeat(Math.ceil((256 * 1024) / 24)),
-        },
-      })}\n`;
+      const want = LARGE_OUTPUT;
       const got = Buffer.from(await stdout);
       expect(got.length).toBeGreaterThan(256 * 1024);
       expect(got.equals(Buffer.from(want))).toBe(true);
@@ -305,6 +310,38 @@ else process.exit(code);
       try {
         proc.stdin.end();
       } catch {}
+    }
+  }, 120_000);
+
+  // A real slow reader, registered only for the sh starter (so never on Windows). Not a skipIf:
+  // the CI gate job fails a leg on any skipped test, so the Windows reports must not contain it.
+  // The starter's stdout goes into a pipeline whose reader waits
+  // 1.5 s before it reads. Bounded; only the sh this test started is killed.
+  if (H?.STARTER === "sh") test("256 KiB into a reader that starts 1.5 s late: byte for byte, exit 0", async () => {
+    const proc = Bun.spawn({
+      cmd: ["sh", "-c", '{ sh "$1" run "$2" large; echo "status $?" >&2; } | (sleep 1.5; cat)', "_", join(sb.root, "bootstrap", "getty-bun.sh"), ENTRY],
+      env: sb.env,
+      cwd: sb.cwd,
+      stdin: Buffer.from(await bytes("input/subagent-start.json")),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const stdout = new Response(proc.stdout).arrayBuffer();
+    const stderr = new Response(proc.stderr).text();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const bound = new Promise<"timeout">((resolve) => {
+        timer = setTimeout(() => resolve("timeout"), 60_000);
+      });
+      expect(await Promise.race([proc.exited, bound])).toBe(0);
+      const got = Buffer.from(await stdout);
+      expect(got.length).toBeGreaterThan(256 * 1024);
+      expect(got.equals(Buffer.from(LARGE_OUTPUT))).toBe(true);
+      // the pipeline's own status is cat's, so the starter's status is reported on stderr
+      expect(await stderr).toBe("status 0\n");
+    } finally {
+      clearTimeout(timer);
+      killTree(proc);
     }
   }, 120_000);
 

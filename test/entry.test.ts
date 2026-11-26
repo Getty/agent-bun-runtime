@@ -35,8 +35,6 @@ interface RunOptions {
   /** Close stdin after the chunks (EOF); default: keep it open until the entry has exited. */
   close?: boolean;
   env?: Record<string, string>;
-  /** Start reading stdout this long after the child started (a slow host); stderr is read at once. */
-  lateReadMs?: number;
 }
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -51,10 +49,7 @@ async function runEntry(options: RunOptions): Promise<Run> {
     stderr: "pipe",
     env: { ...process.env, HOME: home, GETTY_HOME: home, ...options.env },
   });
-  const stdout = (async () => {
-    if (options.lateReadMs) await pause(options.lateReadMs);
-    return await new Response(proc.stdout).text();
-  })();
+  const stdout = new Response(proc.stdout).text();
   const stderr = new Response(proc.stderr).text();
   try {
     for (const [index, chunk] of options.chunks.entries()) {
@@ -250,18 +245,19 @@ describe("every SDK failure in a real process: exit 1, one stderr line, empty st
   }
 });
 
-describe("output larger than a pipe buffer", () => {
-  // About 256 KiB, more than a Windows pipe buffer (4 KiB default) and a Linux one (64 KiB): the
-  // child must block on a full pipe and finish once the reader starts, 1.5 s after the spawn,
-  // with every byte in place.
+describe("large output", () => {
+  // About 256 KiB through main() and the real stdout pipe, byte for byte, exit 0. This catches a
+  // writer that returns before the bytes are written (process.exit would cut them off). Bun.spawn
+  // drains the child's stdout from the start, so this does not exercise a slow reader; the pipe
+  // buffer size of Windows is not checked here.
   const big = "0123456789abcdef-Grüße-\n".repeat(Math.ceil((256 * 1024) / 24));
-  test("add-context of about 256 KiB read late: all bytes arrive, exit 0", async () => {
+  test("add-context of about 256 KiB: all bytes arrive, exit 0", async () => {
     const input = {
       hook_event_name: "SubagentStart",
       effect: { kind: "add-context", text: big, audience: "model", placement: "subagent-input" },
     };
     expect(enc.encode(big).length).toBeGreaterThan(256 * 1024);
-    const run = await runEntry({ chunks: [JSON.stringify(input)], lateReadMs: 1500 });
+    const run = await runEntry({ chunks: [JSON.stringify(input)] });
     expect(run.code).toBe(0);
     expect(run.stderr).toBe("");
     expect(run.stdout.length).toBe(big.length);
