@@ -198,3 +198,97 @@ jobs:
             echo
             bun bootstrap/test/measure-hook.ts
           } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  sdk:
+    # The SDK suite (test/) and typecheck. `./test/` with the ./ : a bare `test/` is a path
+    # substring filter in bun test and would also run bootstrap/test.
+    # One Linux leg and one Windows leg, every step under bash: the tests spawn their
+    # children through Bun.spawn, so the step's shell does not reach them. The Windows leg
+    # is there for the k11 empty-output case (stdout on a pipe, Bun.write of an empty
+    # buffer fails with EINVAL on Windows); its negative control is skipped off Windows, so
+    # the JUnit report is checked to prove it ran there.
+    name: sdk checks (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x64, os: ubuntu-latest }
+          - { name: windows, os: windows-latest }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.HARNESS_BUN_VERSION }}
+      - name: Install
+        shell: bash
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        # tsc output does not depend on the OS; the gate job's prepack build runs tsc on
+        # every platform anyway, which covers the native tsc binary per platform.
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bun run typecheck
+      - name: SDK tests
+        shell: bash
+        run: |
+          mkdir -p .dev
+          rm -f .dev/sdk-junit.xml
+          bun test ./test/ --reporter=junit --reporter-outfile=.dev/sdk-junit.xml
+      - name: SDK tests ran (negative control on Windows)
+        shell: bash
+        run: |
+          # Windows-only cases are skipped elsewhere, so skips are allowed; on Windows the
+          # k11 raw-empty-write control must be present and not skipped.
+          if [ "$RUNNER_OS" = Windows ]; then
+            bun .github/scripts/assert-tests-ran.ts --allow-skips --require-ran "fails with EINVAL on Windows" .dev/sdk-junit.xml
+          else
+            bun .github/scripts/assert-tests-ran.ts --allow-skips .dev/sdk-junit.xml
+          fi
+
+  gate:
+    # Phase 2 gate (docs/plan.md): the packed SDK, bundled into a scratch consumer, runs
+    # offline through the starter under test. The harness Bun only runs the test file; the
+    # Bun the starter installs is the one under test.
+    name: gate (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x64 sh, os: ubuntu-latest, starter: sh }
+          - { name: linux-arm64 sh, os: ubuntu-24.04-arm, starter: sh }
+          - { name: windows powershell, os: windows-latest, starter: powershell }
+          - { name: windows pwsh, os: windows-latest, starter: pwsh }
+    env:
+      GETTY_BUN_TEST_STARTER: ${{ matrix.starter }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.HARNESS_BUN_VERSION }}
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .dev/fixtures
+          key: fixtures-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bootstrap/versions.json') }}
+      - name: Fetch fixtures
+        shell: bash
+        run: bun bootstrap/test/fetch-fixtures.ts
+      - name: Install
+        # bun pm pack runs the prepack build (tsc), which needs the dev dependencies.
+        shell: bash
+        run: bun install --frozen-lockfile
+      - name: Gate
+        shell: bash
+        run: |
+          # A skipped gate exits 0 in bun test, so the JUnit report is checked: the step
+          # fails on 0 tests, on any skipped test, and on a missing report.
+          rm -f .dev/gate-junit.xml
+          GETTY_BUN_TEST_GATE=1 bun test ./test/gate/ --reporter=junit --reporter-outfile=.dev/gate-junit.xml
+          bun .github/scripts/assert-tests-ran.ts .dev/gate-junit.xml
