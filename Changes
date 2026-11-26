@@ -43,8 +43,10 @@ Revision history for agent-bun-runtime
     that serve nothing but PreToolUse and UserPromptSubmit. One stderr line
     with a typed error code either way.
   - Starters run Bun without the project's bunfig.toml, .env files and
-    BUN_OPTIONS, so a hook started in a hostile project directory runs
-    the same code as anywhere else.
+    the environment variables that load code or redirect module lookup
+    (BUN_OPTIONS, BUN_INSPECT_PRELOAD, BUN_INSPECT, NODE_PATH and the
+    cache-directory variables), so a hook started in a hostile project
+    directory runs the same code as anywhere else.
   - Consumer skills in skills/: getty-bun, getty-bun-integration and the
     skilletor template getty-bun-install, which renders the pinned
     starters for a plugin from vars.bun_version. Consumers take the SDK

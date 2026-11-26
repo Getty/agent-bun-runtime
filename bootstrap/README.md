@@ -405,14 +405,23 @@ A hook runs with the user's project as its working directory, and the starter ke
 directory (the SDK reports it as `process.cwd()`). Bun would read the project's
 `bunfig.toml` (`preload` runs code before the entry, `[define]` rewrites the entry's
 code), its `.env`, `.env.local` and `.env.<NODE_ENV>`, and flags from `BUN_OPTIONS`
-(`--preload` included, even past `--config`). So the starters run the entry as
+(`--preload` included, even past `--config`). Other variables in the hook's environment
+load code or move it outside the plugin, and `--config` does not touch them:
+`BUN_INSPECT_PRELOAD` adds a preload, `BUN_INSPECT` and `BUN_INSPECT_CONNECT_TO` start the
+debugger, whose client evaluates code, `NODE_PATH` resolves bare specifiers outside the
+plugin, `NODE_COMPILE_CACHE` and `BUN_RUNTIME_TRANSPILER_CACHE_PATH` pick cache
+directories whose entries Bun restores as code, and `BUN_INTERNAL_WEBVIEW_HOST` (macOS)
+turns the process into a webview host that never runs the entry. So the starters run the
+entry as
 
 ```
 <slot>/bin/bun --no-install --config=<empty file> --no-env-file <root>/<entry> [args...]
 ```
 
 and the staging probe as `bun --config=<empty file> --no-env-file --version`, each with
-`BUN_OPTIONS` removed from Bun's environment, so the entry does not see it either.
+`BUN_OPTIONS`, `BUN_INSPECT_PRELOAD`, `BUN_INSPECT`, `BUN_INSPECT_CONNECT_TO`, `NODE_PATH`,
+`NODE_COMPILE_CACHE`, `BUN_RUNTIME_TRANSPILER_CACHE_PATH` and `BUN_INTERNAL_WEBVIEW_HOST`
+removed from Bun's environment, so the entry does not see them either.
 `getty-bun.sh` uses `/dev/null` as the empty file: it exists on every POSIX system and
 needs nothing created. `getty-bun.ps1` has no `/dev/null` (and `NUL` is not checked), so
 it keeps one empty file for all versions at `<GETTY_HOME>\runtimes\bun\.config\bunfig.toml`,
@@ -420,16 +429,28 @@ created by `run` and `ensure` with an atomic rename when it is missing; a file w
 content or a directory at that path fails with exit 1 and is left alone. `status`
 creates nothing. A `--config` file that does not exist makes Bun exit 1, which a
 caller cannot tell from an entry's exit 1, so the file must exist. Under Git Bash the sh
-starter removes `BUN_OPTIONS` before it forwards to PowerShell; `getty-bun.ps1` removes it
-from its own process environment once, at the start, and never edits the child's
+starter removes these variables before it forwards to PowerShell; `getty-bun.ps1` removes
+them from its own process environment once, at the start, and never edits the child's
 environment block (.NET rebuilds that block and throws on names that differ only in case,
 such as `Path` and `PATH`). The scenarios in `bootstrap/test/hostile-cwd.test.ts` and the
 gate check all of this on every CI leg; the Windows legs had not run when this was
 written. (Bun 1.4.5 linux-x64:
 executed; without these, a project `preload`, a `[define]`, `.env`, `.env.local` and a
-`BUN_OPTIONS` preload all reached the entry; with them none did. `bun --version` ignores a
-project `bunfig.toml` and a `BUN_OPTIONS` preload, but `BUN_OPTIONS=--help` replaced its
-output and failed the install. `~/.bunfig.toml`, `$XDG_CONFIG_HOME/.bunfig.toml`, a
+`BUN_OPTIONS` preload all reached the entry; with them none did. k40, same platform: the
+suite removes all seven other variables and checks that none reaches the entry. Its
+controls ran a raw Bun with these flags: a `BUN_INSPECT_PRELOAD` module ran before the
+entry, `NODE_PATH` resolved a bare specifier outside the plugin, and `NODE_COMPILE_CACHE`
+and `BUN_RUNTIME_TRANSPILER_CACHE_PATH` made Bun write to the chosen directories (that
+Bun restores those entries as code is source-checked at `bun-v1.4.5`). The debugger
+effect was executed only by a raw probe outside the suite: `BUN_INSPECT` opened a
+listener, `BUN_INSPECT_CONNECT_TO` dialled `tcp://` and `unix://` addresses; a
+`BUN_INSPECT` value with `?wait=1` held the process until a debugger attached, which
+holds a hook until the host's timeout. `BUN_INTERNAL_WEBVIEW_HOST` is source-checked
+only (macOS). Kept: `NODE_OPTIONS` (Bun ignores it), `XDG_CACHE_HOME` and
+`HOME` (the user's own directories), `NODE_CHANNEL_FD` (an IPC descriptor, loads no
+code); loader variables such as `LD_PRELOAD` are not Bun's and out of scope.
+`bun --version` ignores a project `bunfig.toml` and a `BUN_OPTIONS` preload, but
+`BUN_OPTIONS=--help` replaced its output and failed the install. `~/.bunfig.toml`, `$XDG_CONFIG_HOME/.bunfig.toml`, a
 `bunfig.toml` in the parent directory and `NODE_OPTIONS=--require` had no effect on a file
 run. A bundle built with `bun build --target=bun` (marked `// @bun`) is not rewritten by a
 project's `[define]`; a plain entry is.)

@@ -109,10 +109,13 @@ the same `GETTY_HOME`, and read the `getty-bun: ` line.
 - **`… not found on PATH`**: the Linux starter needs `sh`, `curl` or `wget`, `unzip`,
   `sha256sum` or `shasum`, and `flock` (util-linux) to install; not to run a ready slot.
 - **The entry behaves as if a project setting reached it**: it cannot. The starters run
-  `bun --no-install --config=<empty file> --no-env-file <entry>` with `BUN_OPTIONS`
-  removed, so the project's `bunfig.toml`, `.env*` files and `BUN_OPTIONS` never reach
-  the entry. A Bun child process that the entry starts through `process.execPath` must
-  pass the same flags itself.
+  `bun --no-install --config=<empty file> --no-env-file <entry>` with `BUN_OPTIONS` and
+  the preload, debugger, module-path and code-cache variables removed
+  (`BUN_INSPECT_PRELOAD`, `BUN_INSPECT`, `BUN_INSPECT_CONNECT_TO`, `NODE_PATH`,
+  `NODE_COMPILE_CACHE`, `BUN_RUNTIME_TRANSPILER_CACHE_PATH`, `BUN_INTERNAL_WEBVIEW_HOST`),
+  so the project's `bunfig.toml`, `.env*` files and those variables never reach the
+  entry. A Bun child process that the entry starts through `process.execPath` must pass
+  the same flags and drop the same variables itself.
 - **Hook works by hand but not in the host**: compare `GETTY_HOME` and what the default
   store comes from between your shell and the host process: `HOME` on Linux; on Windows
   the profile directory of the account the host runs as (`%USERPROFILE%`), never `HOME`.

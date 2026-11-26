@@ -68,7 +68,8 @@ SDK (phase 2), from the repository root; the harness Bun alone is enough, neithe
 .dev/harness/bun install --frozen-lockfile
 .dev/harness/bun run typecheck
 .dev/harness/bun test ./test/      # the ./ matters: a bare test/ also runs bootstrap/test
-GETTY_BUN_TEST_GATE=1 GETTY_BUN_TEST_STARTER=sh .dev/harness/bun test ./test/gate/   # gate
+GETTY_BUN_TEST_GATE=1 GETTY_BUN_TEST_STARTER=sh GETTY_BUN_TEST_NUNJUCKS="$PWD/.dev/njk" \
+  .dev/harness/bun test ./test/gate/   # gate; .dev/njk holds node_modules/nunjucks 3.2.4
 .dev/harness/bun pm pack --dry-run
 ```
 

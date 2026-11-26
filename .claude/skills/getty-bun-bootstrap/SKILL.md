@@ -25,13 +25,19 @@ exist: `getty-bun.sh` needs POSIX `sh`, `curl` or `wget`, `unzip`, `sha256sum` (
   that does not match fails closed with a message naming the path.
 - **Absolute executable.** Run the slot's Bun by absolute path as
   `bun --no-install --config=<empty file> --no-env-file <entry>` (the staging probe:
-  `--config=<empty file> --no-env-file --version`), with `BUN_OPTIONS` removed before
-  Bun starts and no `cd`. The empty file is `/dev/null` in `getty-bun.sh` and
+  `--config=<empty file> --no-env-file --version`), with `BUN_OPTIONS`,
+  `BUN_INSPECT_PRELOAD`, `BUN_INSPECT`, `BUN_INSPECT_CONNECT_TO`, `NODE_PATH`,
+  `NODE_COMPILE_CACHE`, `BUN_RUNTIME_TRANSPILER_CACHE_PATH` and
+  `BUN_INTERNAL_WEBVIEW_HOST` removed from Bun's environment before Bun starts and no
+  `cd`. The empty file is `/dev/null` in `getty-bun.sh` and
   `<GETTY_HOME>\runtimes\bun\.config\bunfig.toml` in `getty-bun.ps1`. Why: the hook's
   cwd is the user's project, whose `bunfig.toml`, `.env*` and `BUN_OPTIONS` would
-  otherwise reach the entry ([bootstrap/README.md](../../../bootstrap/README.md),
-  "Starting Bun: no project configuration"). Never PATH, a `current` link,
-  `bun upgrade`, `bunx` or a shebang.
+  otherwise reach the entry; the other variables load code or move it outside the
+  plugin, and `--config` does not touch them: a preload, the debugger, bare specifiers
+  resolved outside the plugin, cache directories whose entries Bun restores as code, a
+  macOS webview host that never runs the entry
+  ([bootstrap/README.md](../../../bootstrap/README.md), "Starting Bun: no project
+  configuration"). Never PATH, a `current` link, `bun upgrade`, `bunx` or a shebang.
 - **Lock.** One process holds the OS lock across download, verify and publish (`flock`
   on Linux; `FileShare.None` on Windows). Waiters block, bounded by
   `GETTY_BUN_LOCK_WAIT` (default 300 s), then re-check the slot. `.installing` is

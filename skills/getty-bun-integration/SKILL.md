@@ -49,11 +49,13 @@ you observed it.
   closed.
 - **Bun starts without the user's project.** The starters run
   `<slot>/bin/bun --no-install --config=<empty file> --no-env-file <root>/<entry>` with
-  `BUN_OPTIONS` removed and the hook's working directory kept: the project's
-  `bunfig.toml` (preload, `[define]`), `.env*` files and `BUN_OPTIONS` never reach the
-  entry. A Bun child process the entry starts through `process.execPath` inherits cwd and
-  environment, so pass it `--config=<empty file> --no-env-file` (and `--no-install`) and
-  delete `BUN_OPTIONS` from its environment. Never PATH, a `current` link, `bun upgrade`,
+  `BUN_OPTIONS` and the preload, debugger, module-path and code-cache variables removed
+  (the list: [contract.md](references/contract.md), "Bun without the project") and the
+  hook's working directory kept: the project's `bunfig.toml` (preload, `[define]`),
+  `.env*` files and those variables never reach the entry. A Bun child process the entry
+  starts through `process.execPath` inherits cwd and environment, so pass it
+  `--config=<empty file> --no-env-file` (and `--no-install`) and delete the same
+  variables from its environment. Never PATH, a `current` link, `bun upgrade`,
   `bunx`, or a shebang.
 - stdout belongs to the entry (one hook JSON, written once by `main()`); every diagnostic
   goes to stderr. The starter exits 1 for its own failures and passes the entry's code

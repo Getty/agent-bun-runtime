@@ -324,7 +324,7 @@ install_locked() {
     fail "cannot extract $pin_member from $url"
   chmod 755 "$stage/slot/bin/bun" 2>/dev/null || fail "cannot chmod $stage/slot/bin/bun"
 
-  # The same isolation as the entry's start below (BUN_OPTIONS is unset in main).
+  # The same isolation as the entry's start below (main unsets BUN_OPTIONS and others).
   _v=$("$stage/slot/bin/bun" --config=/dev/null --no-env-file --version 2>/dev/null 9>&-) ||
     fail "the Bun from $url does not run ($stage/slot/bin/bun --version failed); nothing was published"
   [ "$_v" = "$pin_version" ] ||
@@ -399,9 +399,14 @@ write_installing() {
 # --- main --------------------------------------------------------------------------
 
 # BUN_OPTIONS adds flags to every Bun start, --preload included and even past --config,
-# and the cwd of a hook is the user's project. Removed here, before the Git Bash
-# forwarding, so neither the staging probe nor the entry, nor PowerShell's Bun, sees it.
-unset BUN_OPTIONS
+# and the cwd of a hook is the user's project. The others, untouched by --config, load
+# code or move it outside the plugin: BUN_INSPECT_PRELOAD (preload), BUN_INSPECT*
+# (debugger), NODE_PATH (module path), env-chosen code caches, and a macOS webview host
+# that replaces the entry.
+# Removed here, before the Git Bash forwarding, so neither the staging probe nor the
+# entry, nor PowerShell's Bun, sees them.
+unset BUN_OPTIONS BUN_INSPECT_PRELOAD BUN_INSPECT BUN_INSPECT_CONNECT_TO NODE_PATH \
+  NODE_COMPILE_CACHE BUN_RUNTIME_TRANSPILER_CACHE_PATH BUN_INTERNAL_WEBVIEW_HOST
 
 _u=$(uname -sm 2>/dev/null) || fail "uname failed"
 os=${_u%% *}
@@ -488,5 +493,6 @@ ensure_slot
 # --config=/dev/null replaces bunfig.toml (preload, [define]) with an empty config; a
 # missing --config file would exit 1 like an entry, and /dev/null exists everywhere,
 # with nothing to create. --no-env-file skips .env, .env.local, .env.<NODE_ENV>.
-# BUN_OPTIONS is unset in main. Entry arguments follow the entry path untouched.
+# BUN_OPTIONS and the variables beside it are unset in main. Entry arguments follow the
+# entry path untouched.
 exec "$slot/bin/bun" --no-install --config=/dev/null --no-env-file "$root/$entry" "$@"

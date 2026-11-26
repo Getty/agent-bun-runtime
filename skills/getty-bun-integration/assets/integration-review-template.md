@@ -21,7 +21,7 @@ Contract version 1 (`gettyBun.contractVersion`), agent-bun-runtime release: ____
 | Bundled entry committed (`bun build --target=bun`); CI rebuild byte-identical; no external packages | | |
 | `onFailure` chosen per entry (`"closed"` only for guards on entries serving nothing but `PreToolUse`/`UserPromptSubmit`; `"open"` on any entry that serves `Stop`, `SubagentStop` or another event); `maxInputBytes` fits the largest expected payload | | |
 | Effects per event within what the codec delivers; handler never writes stdout | | |
-| Bun child processes started with `--no-install --config=<empty file> --no-env-file`, `BUN_OPTIONS` removed | | |
+| Bun child processes started with `--no-install --config=<empty file> --no-env-file`, `BUN_OPTIONS` and the other variables the starters remove (contract, "Bun without the project") removed | | |
 | Hooks call the starter's `run`; only `run`, `ensure`, `status` used | | |
 | Codex `command` and `commandWindows` in a hook file of its own, named by the Codex manifest; `"${PLUGIN_ROOT}"` quoted | | |
 | Claude Code hooks in `hooks/hooks.json` (Windows: open decision, no support claimed) | | |

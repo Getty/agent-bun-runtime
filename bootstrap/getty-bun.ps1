@@ -726,11 +726,17 @@ function Invoke-GettyBun([string]$ScriptPath, [string[]]$Argv) {
     } else {
         Fail $usage
     }
-    # BUN_OPTIONS would add Bun flags (a --preload, too) after --config and --no-env-file.
-    # Removed from this process, so the probe and the entry inherit the environment without
-    # it; never through ProcessStartInfo.EnvironmentVariables, which throws on names that
-    # differ only in case (Path and PATH under MSYS or Cygwin).
-    [Environment]::SetEnvironmentVariable('BUN_OPTIONS', $null)
+    # BUN_OPTIONS would add Bun flags (a --preload, too) after --config and --no-env-file;
+    # the others load code or move it outside the plugin: a preload, the inspector, module
+    # resolution, env-chosen caches, the macOS webview host (k40). Removed from this
+    # process, so the probe and the entry inherit the environment without them; never
+    # through ProcessStartInfo.EnvironmentVariables, which throws on names that differ only
+    # in case (Path and PATH under MSYS or Cygwin).
+    foreach ($name in @('BUN_OPTIONS', 'BUN_INSPECT_PRELOAD', 'BUN_INSPECT',
+            'BUN_INSPECT_CONNECT_TO', 'NODE_PATH', 'NODE_COMPILE_CACHE',
+            'BUN_RUNTIME_TRANSPILER_CACHE_PATH', 'BUN_INTERNAL_WEBVIEW_HOST')) {
+        [Environment]::SetEnvironmentVariable($name, $null)
+    }
 
     $gettyHome = Get-GettyHome
     $null = Get-LockWait

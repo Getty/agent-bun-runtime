@@ -15,7 +15,7 @@ The starters are verified in agent-bun-runtime, not in each consumer. The gate p
 ## Provider gates (agent-bun-runtime, phases 2 and 2b)
 
 - **Phase 2** (SDK core and the first Codex events): the tarball of `bun pm pack`, bundled with `bun build --target=bun` into a scratch consumer, runs offline through the starters. Green on `main` at `0bc8218`, CI 45886094409 (push).
-- **Phase 2b** (the 0.1.0 release): the phase 2 gate run from a hostile project directory (a `bunfig.toml` preload and `[define]`, `.env.local`, `BUN_OPTIONS`, none of which may reach the entry, k29), Claude Code payloads through both starters, and a scratch plugin rendered from `getty-bun-install` whose starter runs a hook, on all CI legs (`docs/plan.md`, "Phases and gates"). The release checklist (`docs/release-0.1.0.md`) tags only after that gate is green; cite the run of the tagged commit.
+- **Phase 2b** (the 0.1.0 release): the phase 2 gate run from a hostile project directory (a `bunfig.toml` preload and `[define]`, `.env.local`, `BUN_OPTIONS`, none of which may reach the entry, k29; the starters also remove the preload, debugger, module-path and code-cache variables, k40), Claude Code payloads through both starters, and a scratch plugin rendered from `getty-bun-install` whose starter runs a hook, on all CI legs (`docs/plan.md`, "Phases and gates"). The release checklist (`docs/release-0.1.0.md`) tags only after that gate is green; cite the run of the tagged commit.
 
 These gates prove the codecs against recorded or source-derived payloads, not against a host.
 
@@ -34,7 +34,7 @@ Outside the gates, not checked: any host (Codex, Claude Code); a Windows desktop
 | Pin consistency | CI: `gettyBun` validates against the schema (`contractVersion` 1 only); the starters' pin block equals `gettyBun.bunVersion`; the committed starters equal a fresh render of `getty-bun-install` (its "Check the copy in CI"). |
 | Bundled entry | CI: a rebuild with the pinned Bun is byte-identical; no `external` packages; a missing import fails at run time without a download. |
 | Entry on the SDK | `bun:test` through `main()` with recorded host payloads (host version named) for every wired event and effect; a malformed payload exits 1, or 2 with `onFailure: "closed"`, with one `agent-bun-runtime: ` line; the host comes from the hook command, not the environment ([sdk.md](sdk.md), "Testing"). |
-| Hostile project | The hook runs from a project with a `bunfig.toml` preload, `.env.local` and `BUN_OPTIONS`; none reaches the entry or a Bun child it starts. |
+| Hostile project | The hook runs from a project with a `bunfig.toml` preload, `.env.local`, `BUN_OPTIONS`, `BUN_INSPECT_PRELOAD` and `NODE_PATH`; none reaches the entry or a Bun child it starts. |
 | Large input | The biggest payload the plugin expects (a `Write` or `PostToolUse` result) stays under `maxInputBytes`, or that hook has its own bound. |
 | Offline after install | `run` works without network. |
 | Native Windows and WSL | Separate roots, targets and slots; Git Bash forwarding uses the same slot and lock as PowerShell. |

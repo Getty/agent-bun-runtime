@@ -8,8 +8,8 @@
 //
 //   GETTY_BUN_TEST_STARTER=sh bun test bootstrap/test/hostile-cwd.test.ts
 
-import { describe, expect, setDefaultTimeout, test } from "bun:test";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
+import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   IS_WIN,
@@ -214,6 +214,151 @@ describe(`hostile project cwd (k29) [${STARTER}]`, () => {
   });
 });
 
+// k40: Bun 1.4.5 reads more environment variables that load code or change where an entry's
+// modules come from than BUN_OPTIONS: BUN_INSPECT_PRELOAD is a preload even under --config and
+// --no-env-file, NODE_PATH adds a resolution root, BUN_INSPECT / BUN_INSPECT_CONNECT_TO start a
+// debugger, NODE_COMPILE_CACHE and BUN_RUNTIME_TRANSPILER_CACHE_PATH choose cache directories,
+// BUN_INTERNAL_WEBVIEW_HOST is macOS-only. The starter removes all seven from the entry's
+// environment. Controls first: a raw Bun with the starter's flags must show the preload, the
+// NODE_PATH package and the cache writes, so a green starter run cannot mean the attack never
+// worked here. The controls set no BUN_INSPECT* and no BUN_INTERNAL_WEBVIEW_HOST (not run raw:
+// the debugger and the macOS host mode are not cheap or portable); those three are covered by the
+// entry's view of process.env only.
+const LOADER_VARS = [
+  "BUN_INSPECT_PRELOAD",
+  "BUN_INSPECT",
+  "BUN_INSPECT_CONNECT_TO",
+  "NODE_PATH",
+  "NODE_COMPILE_CACHE",
+  "BUN_RUNTIME_TRANSPILER_CACHE_PATH",
+  "BUN_INTERNAL_WEBVIEW_HOST",
+] as const;
+
+// The transpiler cache stores only entries of 4 KB and more (scout, checked with Bun 1.4.5 on Linux).
+const LOADERS_ENTRY = `// reports what the environment could have changed
+let pkg: unknown = null;
+try { pkg = require("k40-nodepath-pkg"); } catch {}
+const names = ${JSON.stringify(LOADER_VARS)};
+process.stdout.write(JSON.stringify({
+  pkg,
+  env: Object.fromEntries(names.map((n) => [n, process.env[n] ?? null])),
+}) + "\\n");
+// padding: ${"x".repeat(6000)}
+`;
+
+const mine: string[] = [];
+afterEach(async () => {
+  while (mine.length) await rm(mine.pop()!, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+});
+
+interface Loaders {
+  env: Record<string, string>;
+  emptyConfig: string;
+  preloadMarker: string;
+  transpilerCache: string;
+  compileCache: string;
+}
+
+const fwd = (p: string) => p.replaceAll("\\", "/");
+
+async function loaderAttack(sb: Sandbox): Promise<Loaders> {
+  mine.push(sb.tmp);
+  const dir = join(sb.tmp, "loaders");
+  const pkgDir = join(dir, "node-path", "k40-nodepath-pkg");
+  const transpilerCache = join(dir, "transpiler-cache");
+  const compileCache = join(dir, "compile-cache");
+  const preloadMarker = join(dir, "inspect-preload-marker");
+  const emptyConfig = join(dir, "empty-bunfig.toml");
+  await mkdir(pkgDir, { recursive: true });
+  await mkdir(transpilerCache, { recursive: true });
+  await mkdir(compileCache, { recursive: true });
+  await writeFile(join(pkgDir, "index.js"), `module.exports = "from-node-path";\n`);
+  await writeFile(emptyConfig, "");
+  const preload = join(dir, "inspect-preload.ts");
+  await writeFile(
+    preload,
+    `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(preloadMarker)}, "ran");\nconsole.error("HOSTILE BUN_INSPECT_PRELOAD RAN");\n`,
+  );
+  await writeFile(join(sb.root, "entries", "loaders.ts"), LOADERS_ENTRY);
+  const env: Record<string, string> = {
+    ...sb.env,
+    BUN_INSPECT_PRELOAD: fwd(preload),
+    NODE_PATH: join(dir, "node-path"),
+    NODE_COMPILE_CACHE: compileCache,
+    BUN_RUNTIME_TRANSPILER_CACHE_PATH: transpilerCache,
+    // a unix socket path in the sandbox: Bun 1.4.5 listens there (a socket file, no port) and exits
+    // normally; a ws://host:port value would open a port or fail. Executed on Linux only.
+    BUN_INSPECT: `ws+unix://${fwd(join(dir, "inspect.sock"))}`,
+    // nothing listens at this path: connecting fails fast (executed on Linux: no hang)
+    BUN_INSPECT_CONNECT_TO: fwd(join(dir, "connect.sock")),
+    BUN_INTERNAL_WEBVIEW_HOST: "1",
+  };
+  delete env.NODE_ENV;
+  return { env, emptyConfig, preloadMarker, transpilerCache, compileCache };
+}
+
+async function dirEntries(d: string): Promise<string[]> {
+  return readdir(d).catch(() => []);
+}
+
+/** Control: the same flags as the starter, a raw Bun, only the loader variables the control can run. */
+async function expectLoadersEffective(sb: Sandbox, l: Loaders, bunPath: string): Promise<void> {
+  const env = { ...l.env };
+  for (const n of ["BUN_INSPECT", "BUN_INSPECT_CONNECT_TO", "BUN_INTERNAL_WEBVIEW_HOST"]) delete env[n];
+  const r = await run(
+    [bunPath, "--no-install", `--config=${l.emptyConfig}`, "--no-env-file", join(sb.root, "entries", "loaders.ts")],
+    { env, cwd: sb.cwd, timeoutMs: 60_000 },
+  );
+  const why = `control (raw ${bunPath}) exit ${r.code}, stderr ${JSON.stringify(r.err)}, stdout ${JSON.stringify(r.out)}`;
+  expect(r.code, why).toBe(0);
+  expect(await exists(l.preloadMarker), `BUN_INSPECT_PRELOAD did not run under --config --no-env-file: ${why}`).toBe(true);
+  expect(JSON.parse(r.out).pkg, `NODE_PATH package not found: ${why}`).toBe("from-node-path");
+  expect(await dirEntries(l.transpilerCache), `BUN_RUNTIME_TRANSPILER_CACHE_PATH not written: ${why}`).not.toEqual([]);
+  expect(await dirEntries(l.compileCache), `NODE_COMPILE_CACHE not written: ${why}`).not.toEqual([]);
+  await rm(l.preloadMarker, { force: true });
+  for (const c of [l.transpilerCache, l.compileCache]) {
+    for (const f of await dirEntries(c)) await rm(join(c, f), { recursive: true, force: true });
+  }
+}
+
+async function expectLoadersGone(l: Loaders, r: RunResult): Promise<void> {
+  const why = `exit ${r.code}, stderr ${JSON.stringify(r.err)}, stdout ${JSON.stringify(r.out)}`;
+  expectExit(r, 0);
+  expect(r.err, why).not.toContain("HOSTILE");
+  expect(await exists(l.preloadMarker), `the BUN_INSPECT_PRELOAD module ran: ${why}`).toBe(false);
+  const seen = JSON.parse(r.out);
+  expect(seen.pkg, `the entry resolved a package through NODE_PATH: ${why}`).toBeNull();
+  expect(seen.env, `the entry sees loader variables: ${why}`).toEqual(Object.fromEntries(LOADER_VARS.map((n) => [n, null])));
+  expect(await dirEntries(l.transpilerCache), `the transpiler cache was written: ${why}`).toEqual([]);
+  expect(await dirEntries(l.compileCache), `the compile cache was written: ${why}`).toEqual([]);
+}
+
+describe(`loader environment variables (k40) [${STARTER}]`, () => {
+  test("installing first run: BUN_INSPECT_PRELOAD, NODE_PATH, the cache and inspector variables do not reach the entry", async () => {
+    const server = await serverFor();
+    const sb = await sandbox({ mirror: server.url });
+    const l = await loaderAttack(sb);
+    await expectLoadersEffective(sb, l, process.execPath);
+
+    const r = await run(starterCmd(sb.root, ["run", "entries/loaders.ts"]), { env: l.env, cwd: sb.cwd, timeoutMs: 120_000 });
+    expect(server.archives(), "this run did not install").toBe(1);
+    await expectLoadersGone(l, r);
+  });
+
+  test("fast path (slot already installed): the same variables do not reach the entry", async () => {
+    const server = await serverFor();
+    const sb = await sandbox({ mirror: server.url });
+    const st = await install(sb);
+    const l = await loaderAttack(sb);
+    await expectLoadersEffective(sb, l, slotBun(st.slot));
+    const requests = server.total();
+
+    const r = await run(starterCmd(sb.root, ["run", "entries/loaders.ts"]), { env: l.env, cwd: sb.cwd, timeoutMs: 120_000 });
+    expect(server.total(), "the fast path made a request").toBe(requests);
+    await expectLoadersGone(l, r);
+  });
+});
+
 // The probe side: BUN_OPTIONS=--help replaces `bun --version` output with the help text, so a
 // starter that leaves BUN_OPTIONS in the staging probe's environment fails the install (HEAD's
 // sh starter: exit 1). The entry runs in a neutral cwd here; nothing hostile but the variable.
@@ -271,6 +416,21 @@ if (IS_WIN && STARTER !== "sh") {
       );
       expect(server.total()).toBe(requests);
       await expectNoEffect(a, r);
+    });
+
+    test("getty-bun.sh under Git Bash forwarding: the loader variables do not reach the entry (k40)", async () => {
+      const bash = findGitBashExe();
+      if (bash === null) throw new Error("Git Bash bash.exe not found on a Windows leg (looked via `git --exec-path` and the standard install paths)");
+      const server = await serverFor();
+      const sb = await sandbox({ mirror: server.url });
+      const st = await install(sb);
+      const l = await loaderAttack(sb);
+      await expectLoadersEffective(sb, l, slotBun(st.slot));
+      const r = await run(
+        [bash, join(sb.root, "bootstrap", "getty-bun.sh").replace(/\\/g, "/"), "run", "entries/loaders.ts"],
+        { env: l.env, cwd: sb.cwd, timeoutMs: 120_000 },
+      );
+      await expectLoadersGone(l, r);
     });
   });
 }
