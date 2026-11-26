@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-11-26T21:54:58Z
+claimed_by: agent-bun-runtime
+class: standard
+completed: 2026-11-26T21:54:58Z
+created: 2026-11-26T21:43:01Z
+id: 41
+priority: medium
+started: 2026-11-26T21:43:28Z
+status: done
+tags:
+- docs
+- release
+- pre-0.1.0
+title: 'docs/release-0.1.0.md: which tarball is published; status lines to change
+  in the stamp commit (hub review F2, F3)'
+updated: 2026-11-26T21:54:58Z
+---
+
+F3: docs/release-0.1.0.md:46-47 must say: rerun `bun pm pack` in the tagged checkout and publish exactly that tarball. F2: README.md:44-47, Changes:19,22 and docs/plan.md:8 are wrong after the release; not changed now: the stamp-commit step (:40) lists each with its new wording.
+
+2026-11-26 main session: docs/release-0.1.0.md: Release step 3 reruns bun pm pack in a clean checkout of the tag and publishes exactly that tarball (F3); Before-the-tag step 3 tarball marked check-only; Release step 1 lists the stamp-commit wording for Changes, README status paragraph and docs/plan.md status (F2). Before-the-tag step 1 names pre-0.1.0.
+
+getty-bun-reviewer 2026-11-26: NO-GO (one small fix). F3 done right: Release step 3 repacks in a clean checkout of v0.1.0 and publishes exactly that tarball; Before-the-tag step 3 marked check-only. F2 quotes verbatim against Changes:19, Changes:22, README.md:43-47, docs/plan.md:8; new wording true after the release. Medium: docs/plan.md:373 '(not published yet; release checklist: ...)' is also false after the release, is not listed, and release-0.1.0.md:61 'Nothing else changes in the stamp commit' forbids fixing it: add a bullet with its new wording (or drop that sentence). Low: README/plan new wording cites only 4f9c556 (PR 3), but 0.1.0 also ships the pre-0.1.0 merge (k40 starter hardening, these docs); name that merge too, and give plan.md the gate CI run like phases 1/2 (placeholders filled at stamp time). Nits: :61 parenthetical about 4f9c556 is a non sequitur; Release step 3 should say 'with the pinned Bun (1.4.5)'. Checks: link check (quoted README links resolve from root), git diff --check clean.
+
+2026-11-26 main session: reviewer findings fixed: stamp step also rewrites plan.md 'Names' bullet (not published yet); README/plan wording names the pre-0.1.0 merge and its PR and a gate CI run as placeholders; placeholders explained, ADRs stay; Release step 3 with the pinned Bun 1.4.5.
+
+getty-bun-reviewer 2026-11-26 re-check: GO. Medium fixed: stamp step covers the plan.md 'Names' bullet under 'Decided' (quote matches plan.md:373-374 verbatim), and :68-69 now exempts only ADRs. Low fixed: README and plan wording name the pre-0.1.0 merge, its PR and the gate CI run as placeholders, explained at :66-68. Nits fixed: :61 reworded; Release step 3 says 'with the pinned Bun (1.4.5)'. Remaining nit, not blocking: release-0.1.0.md:74 is 118 chars, rest of the file wraps at ~90. git diff --check clean.
+
+2026-11-26 21:54 Committed as c74a067 on pre-0.1.0 (docs/release-0.1.0.md only), pushed to origin.
