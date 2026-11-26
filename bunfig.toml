@@ -1,0 +1,5 @@
+# Package scripts and the prepack of `bun pm pack` run tools with a `#!/usr/bin/env node`
+# shebang (tsc). This makes `node` resolve to Bun itself, also where a Node is installed,
+# so typecheck, build and pack need only the pinned Bun.
+[run]
+bun = true

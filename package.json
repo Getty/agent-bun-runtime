@@ -1,0 +1,37 @@
+{
+  "name": "@getty/agent-bun-runtime",
+  "version": "0.1.0",
+  "description": "Shared APIs for Getty agent plugins running on the getty-bun runtime",
+  "license": "Artistic-2.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Getty/agent-bun-runtime.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./codex": {
+      "types": "./dist/codex.d.ts",
+      "default": "./dist/codex.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "bun test ./test/",
+    "prepack": "rm -rf dist && tsc -p tsconfig.build.json"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.5",
+    "typescript": "7.0.2"
+  }
+}
