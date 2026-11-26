@@ -8,6 +8,10 @@ publish gate.
 
 ## Before the tag
 
+`bun` in these steps is Bun 1.4.5, the pin in `bootstrap/versions.json`; on a machine
+without Bun, the harness Bun `.dev/harness/bun` described in the team skill
+`getty-bun-core` (`.claude/skills/getty-bun-core/SKILL.md`, "Tooling on this machine").
+
 1. The phase 2b branch (PR 3) and the branch `pre-0.1.0` are merged into `main` after all
    CI jobs were green and both reviewers approved; `main` CI (push) is green on the merge
    commit.
@@ -27,7 +31,8 @@ publish gate.
    only: it is built before the stamp commit and is never published; delete it.
 4. The template matches the starters: `bun bootstrap/render-template.ts --check`, and with
    nunjucks 3.2.4 installed outside the checkout `bun bootstrap/render-template.ts
-   --nunjucks <dir>/node_modules/nunjucks` (byte identity through a real render), and
+   --check --nunjucks <dir>/node_modules/nunjucks` (byte identity through a real render;
+   without `--check` it writes the template), and
    `bootstrap/render-pin.ts --table bootstrap/versions.json --version 1.4.5 --check
    bootstrap/getty-bun.sh bootstrap/getty-bun.ps1`.
 5. This repository's own `.claude/skilletor.json` already takes `getty-bun-integration`
@@ -40,7 +45,10 @@ publish gate.
 ## Release (owner)
 
 1. The stamp commit, on `main` through a reviewed PR:
-   - `Changes`: replace `{{$NEXT}}` with `0.1.0  <date>` and add a new empty `{{$NEXT}}`
+   - `Changes`: replace `{{$NEXT}}` with the version line in the house format of
+     `getty-git-commit-style`, the version padded to nine columns, a space and the UTC
+     time of the stamp commit, `printf '%-9s %s' 0.1.0 "$(date -u '+%F %TZ')"` (for
+     example `0.1.0     2026-11-27 09:15:00Z`); add a new `{{$NEXT}}` and a blank line
      above it.
    - `Changes`, in the 0.1.0 entry: "SDK package @getty/agent-bun-runtime, not published
      yet." becomes "SDK package @getty/agent-bun-runtime on npm."; "SDK
@@ -58,32 +66,59 @@ publish gate.
    - `docs/plan.md`, the status paragraph: "is being built on branch
      `phase-2b-claude-code`; phase 3 onward is not implemented yet." becomes "is complete:
      merged into `main` at `4f9c556` (PR 3) and `<pre-0.1.0 merge>` (PR `<n>`), gate
-     green in CI run `<run id>`, and released as 0.1.0 (tag `v0.1.0`, npm). Phase 3
-     onward is not implemented yet."
+     green in CI runs `<pr run>` (pull request) and `<push run>` (`main`), and released
+     as 0.1.0 (tag `v0.1.0`, npm). Phase 3 onward is not implemented yet."
    - `docs/plan.md`, the "Names" bullet under "Decided": "(not published yet; release
      checklist: [release-0.1.0.md](release-0.1.0.md))" becomes "(on npm since 0.1.0;
      release checklist: [release-0.1.0.md](release-0.1.0.md))".
    - The placeholders: `4f9c556` is where PR 3 landed on `main`; `<pre-0.1.0 merge>` and
-     `<n>` are where the branch `pre-0.1.0` landed and its PR; `<run id>` is the green CI
-     run on that commit. Nothing else changes in the stamp commit (ADRs are records and
-     keep their wording).
-2. Tag the commit: `git tag -a v0.1.0 -m "0.1.0"`, push the tag. The tag pins the SDK
-   source **and** the skills: consumers install the skills with skilletor at
-   `"ref": "v0.1.0"`, `"path": "skills"`.
-3. Publish by hand, logged in as an owner of the npm org `getty`. In a clean checkout of
-   the tag (`git checkout v0.1.0`), with the pinned Bun (1.4.5), run `bun install
-   --frozen-lockfile` and `bun pm pack` again, check it with `tar tzf`, and publish exactly
-   that tarball: `npm publish --access public getty-agent-bun-runtime-0.1.0.tgz`. Never
-   the tarball from "Before the tag", step 3: it predates the stamp commit. The package is
-   public, Artistic-2.0.
+     `<n>` are where the branch `pre-0.1.0` landed and its PR; `<pr run>` and
+     `<push run>` are the two green CI runs on that commit, of the pull request and of the
+     push to `main`. One rule for the status lines this stamp writes and for later ones:
+     a line that cites a gate names both runs, the pull request's and `main`'s, as
+     `skills/getty-bun-integration/references/verification.md` does for phase 1; older
+     lines stay as they are. Nothing else changes in the stamp commit (ADRs are records
+     and keep their wording).
+2. Merge the stamp PR into `main` fast-forward, so that `main` is the stamp commit itself
+   (`git merge --ff-only` on `main` and push; GitHub's merge buttons do not fast-forward,
+   and "Rebase and merge" gives the commit a new hash and committer date). Wait for the
+   push CI on `main` on that commit; every job must be green. Tag exactly that commit,
+   `git tag -a v0.1.0 -m "0.1.0" <stamp commit>`, push the tag, and from then on name
+   that run wherever the release is cited, in the GitHub release and in consumer reviews
+   (`verification.md`: "cite the run of the tagged commit"; the stamp commit cannot hold
+   its own run). The tag pins the SDK source **and** the skills: consumers install the
+   skills with skilletor at `"ref": "v0.1.0"`, `"path": "skills"`.
+3. Publish by hand, logged in as an owner of the npm org `getty`. In a fresh clone or
+   worktree of the tag (`git clone --branch v0.1.0 <repository> <dir>` or `git worktree
+   add <dir> v0.1.0`; not `git checkout v0.1.0` in a working copy), with the pinned Bun
+   (1.4.5), run `bun install --frozen-lockfile` and `bun pm pack` again, check it with
+   `tar tzf`, and publish exactly that tarball: `npm publish --access public
+   getty-agent-bun-runtime-0.1.0.tgz`. Never the tarball from "Before the tag", step 3: it
+   predates the stamp commit. The package is public, Artistic-2.0.
 4. Check: `npm view @getty/agent-bun-runtime@0.1.0 dist.tarball`, install it into a
    scratch consumer, bundle and run one hook through a starter.
-5. Optional: a GitHub release for `v0.1.0` with the `Changes` entry.
+5. The GitHub release for `v0.1.0` with the `Changes` entry; it names the tagged commit
+   and the green push CI run on it (step 2).
 
 ## After the release
 
-- Set up trusted publishing for `Getty/agent-bun-runtime` on npm (provenance, no
-  long-lived token) before 0.1.1; a CI workflow change by the CI worker.
+- Trusted publishing for `Getty/agent-bun-runtime` on npm (provenance, no long-lived
+  token), in this order; 0.1.1 is its first publish:
+  1. The publish workflow lands on `main` first: written by the CI worker, pushed by the
+     hub (the deploy key may not push workflows). npm registers its file name, and the
+     file must already exist in `.github/workflows/`.
+  2. Then the trusted publisher on npm for the package, with exactly that workflow file
+     name (only the name, with `.yml` or `.yaml`). `npm stage publish` is always allowed;
+     a direct `npm publish` from the workflow is an "allowed action" that has to be
+     switched on in that configuration.
+  3. Then publish 0.1.1 through the workflow within 2 days: a new configuration that has
+     no successful publish within 2 days expires and can no longer be used or edited.
+  4. Then, under the package's publishing access, require two-factor authentication and
+     disallow tokens.
+
+  The workflow needs npm CLI 11.5.1 or later and Node 22.14.0 or later. Source:
+  [docs.npmjs.com/trusted-publishers](https://docs.npmjs.com/trusted-publishers), read
+  2026-11-26T23:29Z.
 - The hub removes `agent-plugins/getty-bun-integration` from Getty/skills and points
   consumers at `Getty/agent-bun-runtime` (`skills/`, `"ref": "v0.1.0"`).
 - Consumers move in their own repositories, skilletor first.
