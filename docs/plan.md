@@ -85,6 +85,7 @@ asks for it.
 
 ```
 getty-bun.sh  run <entry> [args...]   ensure, then exec the absolute Bun with --no-install
+                                      --config=<empty file> --no-env-file (k29)
 getty-bun.sh  ensure                  install if missing; nothing on stdout
 getty-bun.sh  status                  one JSON object on stdout: pin, target, slot, state
 getty-bun.ps1 <same commands>         identical behavior and exit codes

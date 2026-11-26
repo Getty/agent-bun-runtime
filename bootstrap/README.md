@@ -362,6 +362,41 @@ holder overwrites `.installing`, and nothing removes the stale
 `runtimes/bun/.staging/<id>/` in the MVP (no garbage collection). A staging directory is
 safe to delete while no install runs; a published slot never refers to it.
 
+## Starting Bun: no project configuration
+
+A hook runs with the user's project as its working directory, and the starter keeps that
+directory (the SDK reports it as `process.cwd()`). Bun would read the project's
+`bunfig.toml` (`preload` runs code before the entry, `[define]` rewrites the entry's
+code), its `.env`, `.env.local` and `.env.<NODE_ENV>`, and flags from `BUN_OPTIONS`
+(`--preload` included, even past `--config`). So the starters run the entry as
+
+```
+<slot>/bin/bun --no-install --config=<empty file> --no-env-file <root>/<entry> [args...]
+```
+
+and the staging probe as `bun --config=<empty file> --no-env-file --version`, each with
+`BUN_OPTIONS` removed from Bun's environment, so the entry does not see it either.
+`getty-bun.sh` uses `/dev/null` as the empty file: it exists on every POSIX system and
+needs nothing created. `getty-bun.ps1` has no `/dev/null` (and `NUL` is not checked), so
+it keeps one empty file for all versions at `<GETTY_HOME>\runtimes\bun\.config\bunfig.toml`,
+created by `run` and `ensure` with an atomic rename when it is missing; a file with
+content or a directory at that path fails with exit 1 and is left alone. `status`
+creates nothing. A `--config` file that does not exist makes Bun exit 1, which a
+caller cannot tell from an entry's exit 1, so the file must exist. Under Git Bash the sh
+starter removes `BUN_OPTIONS` before it forwards to PowerShell; `getty-bun.ps1` removes it
+from its own process environment once, at the start, and never edits the child's
+environment block (.NET rebuilds that block and throws on names that differ only in case,
+such as `Path` and `PATH`). The scenarios in `bootstrap/test/hostile-cwd.test.ts` and the
+gate check all of this on every CI leg; the Windows legs had not run when this was
+written. (Bun 1.4.5 linux-x64:
+executed; without these, a project `preload`, a `[define]`, `.env`, `.env.local` and a
+`BUN_OPTIONS` preload all reached the entry; with them none did. `bun --version` ignores a
+project `bunfig.toml` and a `BUN_OPTIONS` preload, but `BUN_OPTIONS=--help` replaced its
+output and failed the install. `~/.bunfig.toml`, `$XDG_CONFIG_HOME/.bunfig.toml`, a
+`bunfig.toml` in the parent directory and `NODE_OPTIONS=--require` had no effect on a file
+run. A bundle built with `bun build --target=bun` (marked `// @bun`) is not rewritten by a
+project's `[define]`; a plain entry is.)
+
 ## POSIX starter: tools
 
 `getty-bun.sh` runs under any POSIX `sh` (tested with `dash` and `busybox sh`). The fast

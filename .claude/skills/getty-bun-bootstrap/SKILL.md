@@ -23,8 +23,15 @@ exist: `getty-bun.sh` needs POSIX `sh`, `curl` or `wget`, `unzip`, `sha256sum` (
 - **Publish once.** Stage, verify, then one atomic rename of the whole slot directory,
   receipt included. A published slot is never overwritten or repaired in place; a slot
   that does not match fails closed with a message naming the path.
-- **Absolute executable.** Run the slot's Bun by absolute path with `--no-install`.
-  Never PATH, a `current` link, `bun upgrade`, `bunx` or a shebang.
+- **Absolute executable.** Run the slot's Bun by absolute path as
+  `bun --no-install --config=<empty file> --no-env-file <entry>` (the staging probe:
+  `--config=<empty file> --no-env-file --version`), with `BUN_OPTIONS` removed before
+  Bun starts and no `cd`. The empty file is `/dev/null` in `getty-bun.sh` and
+  `<GETTY_HOME>\runtimes\bun\.config\bunfig.toml` in `getty-bun.ps1`. Why: the hook's
+  cwd is the user's project, whose `bunfig.toml`, `.env*` and `BUN_OPTIONS` would
+  otherwise reach the entry ([bootstrap/README.md](../../../bootstrap/README.md),
+  "Starting Bun: no project configuration"). Never PATH, a `current` link,
+  `bun upgrade`, `bunx` or a shebang.
 - **Lock.** One process holds the OS lock across download, verify and publish (`flock`
   on Linux; `FileShare.None` on Windows). Waiters block, bounded by
   `GETTY_BUN_LOCK_WAIT` (default 300 s), then re-check the slot. `.installing` is

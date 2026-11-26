@@ -324,7 +324,8 @@ install_locked() {
     fail "cannot extract $pin_member from $url"
   chmod 755 "$stage/slot/bin/bun" 2>/dev/null || fail "cannot chmod $stage/slot/bin/bun"
 
-  _v=$("$stage/slot/bin/bun" --version 2>/dev/null 9>&-) ||
+  # The same isolation as the entry's start below (BUN_OPTIONS is unset in main).
+  _v=$("$stage/slot/bin/bun" --config=/dev/null --no-env-file --version 2>/dev/null 9>&-) ||
     fail "the Bun from $url does not run ($stage/slot/bin/bun --version failed); nothing was published"
   [ "$_v" = "$pin_version" ] ||
     fail "version mismatch: the Bun from $url reports '$(one_line "$_v")', pinned $pin_version; nothing was published"
@@ -396,6 +397,11 @@ write_installing() {
 }
 
 # --- main --------------------------------------------------------------------------
+
+# BUN_OPTIONS adds flags to every Bun start, --preload included and even past --config,
+# and the cwd of a hook is the user's project. Removed here, before the Git Bash
+# forwarding, so neither the staging probe nor the entry, nor PowerShell's Bun, sees it.
+unset BUN_OPTIONS
 
 _u=$(uname -sm 2>/dev/null) || fail "uname failed"
 os=${_u%% *}
@@ -478,4 +484,9 @@ case $root in
 esac
 ensure_slot
 [ -x "$slot/bin/bun" ] || fail_mismatch
-exec "$slot/bin/bun" --no-install "$root/$entry" "$@"
+# The cwd stays the caller's (the SDK reports it), so Bun must not read its project files:
+# --config=/dev/null replaces bunfig.toml (preload, [define]) with an empty config; a
+# missing --config file would exit 1 like an entry, and /dev/null exists everywhere,
+# with nothing to create. --no-env-file skips .env, .env.local, .env.<NODE_ENV>.
+# BUN_OPTIONS is unset in main. Entry arguments follow the entry path untouched.
+exec "$slot/bin/bun" --no-install --config=/dev/null --no-env-file "$root/$entry" "$@"

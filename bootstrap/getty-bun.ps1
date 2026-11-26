@@ -235,6 +235,35 @@ function Get-ReceiptText([string]$Version, [string[]]$Fields, [string]$BinarySha
 
 # --- install -----------------------------------------------------------------------
 
+# The empty file every Bun start gets as --config, so Bun reads no bunfig.toml from the
+# working directory (for a hook, the user's project). Created once, version-independent:
+# an empty temporary file renamed into place (a lost race only drops the temporary file).
+# Anything but an empty regular file there fails closed and is left untouched.
+function Initialize-BunConfig([string]$BunDir) {
+    $dir = [System.IO.Path]::Combine($BunDir, '.config')
+    $path = [System.IO.Path]::Combine($dir, 'bunfig.toml')
+    if (-not [System.IO.File]::Exists($path) -and -not [System.IO.Directory]::Exists($path)) {
+        $temp = $path + '.' + $PID
+        try {
+            $null = [System.IO.Directory]::CreateDirectory($dir)
+            [System.IO.File]::WriteAllBytes($temp, [byte[]]@())
+        } catch {
+            Fail ('cannot create ' + $path + ': ' + (Get-Cause $_.Exception).Message)
+        }
+        try {
+            [System.IO.File]::Move($temp, $path)
+        } catch {
+            $cause = Get-Cause $_.Exception
+            try { [System.IO.File]::Delete($temp) } catch { }
+            if (-not [System.IO.File]::Exists($path)) { Fail ('cannot create ' + $path + ': ' + $cause.Message) }
+        }
+    }
+    $empty = $false
+    try { $empty = [System.IO.File]::Exists($path) -and [System.IO.FileInfo]::new($path).Length -eq 0 } catch { }
+    if (-not $empty) { Fail ($path + " is not an empty file (Bun's --config for every start); it is left untouched, remove it") }
+    $path
+}
+
 # The install lock: the lock file opened with FileShare.None, retried until the deadline.
 # Returns the open FileStream, or nothing when the wait ran out.
 function Enter-Lock([string]$Path, [int]$WaitSeconds) {
@@ -409,13 +438,13 @@ function Expand-Member([string]$Zip, [string]$Member, [string]$Destination, [str
 }
 
 # bun --version with its own empty stdin (never the host's input) and its stderr discarded
-# (the starter's stderr carries one getty-bun line at most), as getty-bun.sh does. Bounded,
-# since the install lock is held: a probe still running after $TimeoutSeconds is killed
-# through its process handle.
-function Invoke-Probe([string]$Exe, [int]$TimeoutSeconds = 60) {
+# (the starter's stderr carries one getty-bun line at most), as getty-bun.sh does; the same
+# Bun flags and environment as the entry (Invoke-Bun). Bounded, since the install lock is
+# held: a probe still running after $TimeoutSeconds is killed through its process handle.
+function Invoke-Probe([string]$Exe, [string]$Config, [int]$TimeoutSeconds = 60) {
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
     $psi.FileName = $Exe
-    $psi.Arguments = '--version'
+    $psi.Arguments = ConvertTo-CommandLine @(('--config=' + $Config), '--no-env-file', '--version')
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
     $psi.RedirectStandardInput = $true
@@ -442,12 +471,12 @@ function Invoke-Probe([string]$Exe, [int]$TimeoutSeconds = 60) {
 # The --version probe, retried once after about 1 s when Bun does not start or fails
 # (antivirus may hold a fresh exe), never after a timeout. result: ok, illegal-instruction,
 # fails or version.
-function Test-Bun([string]$Exe, [string]$Version) {
+function Test-Bun([string]$Exe, [string]$Version, [string]$Config) {
     $illegalInstruction = -1073741795 # STATUS_ILLEGAL_INSTRUCTION, 0xC000001D
-    $r = Invoke-Probe $Exe
+    $r = Invoke-Probe $Exe $Config
     if (-not $r.timedOut -and $r.code -ne 0 -and $r.code -ne $illegalInstruction) {
         Start-Sleep -Seconds 1
-        $r = Invoke-Probe $Exe
+        $r = Invoke-Probe $Exe $Config
     }
     if ($r.code -eq $illegalInstruction) { return @{ result = 'illegal-instruction'; detail = 'illegal instruction, STATUS_ILLEGAL_INSTRUCTION' } }
     if ($r.timedOut) { return @{ result = 'fails'; detail = ($Exe + ' --version ' + $r.error) } }
@@ -491,7 +520,7 @@ function Remove-Tree([string]$Path) {
 
 # One target under its lock: 'ready', or 'illegal-instruction' when the staged Bun cannot
 # run on this CPU (nothing published, staging removed, lock released).
-function Install-Target($Pin, [string]$BunDir, [string]$Target, [int]$WaitSeconds) {
+function Install-Target($Pin, [string]$BunDir, [string]$Target, [int]$WaitSeconds, [string]$Config) {
     $version = $Pin.version
     $fields = Get-PinTarget $Pin $Target
     $sha256 = $fields[2]
@@ -538,7 +567,7 @@ function Install-Target($Pin, [string]$BunDir, [string]$Target, [int]$WaitSecond
 
         $stagedExe = [System.IO.Path]::Combine($stage, 'slot', 'bin', 'bun.exe')
         Expand-Member $zip $fields[3] $stagedExe $url
-        $probe = Test-Bun $stagedExe $version
+        $probe = Test-Bun $stagedExe $version $Config
         if ($probe.result -ceq 'illegal-instruction') { return 'illegal-instruction' }
         if ($probe.result -ceq 'fails') { Fail ('the Bun from ' + $url + ' does not run (' + $probe.detail + '); nothing was published') }
         if ($probe.result -ceq 'version') {
@@ -564,7 +593,7 @@ function Install-Target($Pin, [string]$BunDir, [string]$Target, [int]$WaitSecond
         $stage = $null
 
         $exe = [System.IO.Path]::Combine($slot, 'bin', 'bun.exe')
-        $probe = Test-Bun $exe $version
+        $probe = Test-Bun $exe $version $Config
         if ($probe.result -cne 'ok') {
             $detail = $probe.detail
             if ($probe.result -ceq 'version') { $detail = "reports '" + $probe.detail + "', pinned " + $version }
@@ -580,15 +609,15 @@ function Install-Target($Pin, [string]$BunDir, [string]$Target, [int]$WaitSecond
 
 # Detect, then install; an AVX2 build that dies with an illegal instruction falls back to
 # the baseline build under its own lock (as Bun's own install.ps1 does).
-function Install-Pinned($Pin, [string]$BunDir) {
+function Install-Pinned($Pin, [string]$BunDir, [string]$Config) {
     $wait = Get-LockWait
     $target = Get-InstallTarget
     $errorMode = Set-ProbeErrorMode # restored before the entry starts
     try {
-        $result = Install-Target $Pin $BunDir $target $wait
+        $result = Install-Target $Pin $BunDir $target $wait $Config
         if ($result -ceq 'illegal-instruction' -and $target -ceq 'windows-x64') {
             $target = 'windows-x64-baseline'
-            $result = Install-Target $Pin $BunDir $target $wait
+            $result = Install-Target $Pin $BunDir $target $wait $Config
         }
     } finally {
         Restore-ErrorMode $errorMode
@@ -697,6 +726,11 @@ function Invoke-GettyBun([string]$ScriptPath, [string[]]$Argv) {
     } else {
         Fail $usage
     }
+    # BUN_OPTIONS would add Bun flags (a --preload, too) after --config and --no-env-file.
+    # Removed from this process, so the probe and the entry inherit the environment without
+    # it; never through ProcessStartInfo.EnvironmentVariables, which throws on names that
+    # differ only in case (Path and PATH under MSYS or Cygwin).
+    [Environment]::SetEnvironmentVariable('BUN_OPTIONS', $null)
 
     $gettyHome = Get-GettyHome
     $null = Get-LockWait
@@ -720,8 +754,9 @@ function Invoke-GettyBun([string]$ScriptPath, [string[]]$Argv) {
             ',"slot":' + (ConvertTo-JsonString $slot) + ',"state":' + (ConvertTo-JsonString $state) + '}')
         return 0
     }
+    $config = Initialize-BunConfig $bunDir
     if ($null -eq $found) {
-        $found = Install-Pinned $pin $bunDir
+        $found = Install-Pinned $pin $bunDir $config
     } elseif ($found.state -cne 'ready') {
         Fail-Mismatch $found.slot $pin.version $found.target
     }
@@ -733,7 +768,9 @@ function Invoke-GettyBun([string]$ScriptPath, [string[]]$Argv) {
     $rest = @()
     if ($Argv.Count -gt 2) { $rest = $Argv[2..($Argv.Count - 1)] }
     $exe = [System.IO.Path]::Combine($found.slot, 'bin', 'bun.exe')
-    Invoke-Bun $exe (@('--no-install', $entry) + $rest)
+    # Bun's flags before the entry, the entry's own arguments untouched after it; the working
+    # directory stays the caller's (process.cwd() is part of the SDK's interface).
+    Invoke-Bun $exe (@('--no-install', ('--config=' + $config), '--no-env-file', $entry) + $rest)
 }
 
 $exitCode = 1

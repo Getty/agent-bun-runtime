@@ -11,11 +11,15 @@
 // tests say, through the real starter, the installed slot's Bun and real pipes, with no
 // network after the slot install. It does not prove a host: the inputs are the
 // source-checked Codex fixtures of test/fixtures/codex, not a real Codex run (phase 3a).
+// Every hook run uses a hostile project directory as its cwd (k29): a bunfig.toml with a
+// preload and a [define], a .env.local, and BUN_OPTIONS=--preload=... in the env. Bun would
+// run all of it for a raw `bun entry.js`; the starter must not let any of it act (the
+// control test proves the attacks fire, so the gate cannot pass vacuously).
 // Temporary directories carry the prefix abr-gate- and go in this file's afterAll; only
 // processes the harness or this file started are killed (killTree, by recorded handle).
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { cp, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -72,7 +76,9 @@ const GATE = GATE_ON();
 const FIXTURES = join(import.meta.dir, "..", "fixtures", "codex");
 const OFFLINE_MIRROR = "http://127.0.0.1:9"; // the discard port: nothing answers
 const BOUND_MS = 30_000;
-const ENTRY = "bundle/entry.js"; // relative to the consumer root, always with /
+const BUNDLE = "bundle/entry.js"; // relative to the consumer root, always with /
+// What the hooks run: a plain wrapper around the bundle (see beforeAll).
+const ENTRY = "bundle/wrap.js";
 
 if (!GATE) {
   test.skip("phase 2 gate skipped: set GETTY_BUN_TEST_GATE=1 (and GETTY_BUN_TEST_STARTER) to pack, bundle and run it", () => {});
@@ -88,11 +94,46 @@ const LARGE_OUTPUT = `${JSON.stringify({
 const bytes = async (path: string) => await Bun.file(join(FIXTURES, path)).bytes();
 const text = (b: Uint8Array) => new TextDecoder().decode(b);
 
+// A "project" that attacks the Bun started in it. Markers go to files outside the project,
+// so the cwd stays the only thing the attack lives in.
+interface Hostile {
+  cwd: string;
+  bunfigMarker: string;
+  optionsMarker: string;
+  bunOptions: string;
+}
+async function makeHostile(base: string): Promise<Hostile> {
+  const cwd = join(base, "project");
+  const markers = join(base, "markers");
+  await mkdir(cwd, { recursive: true });
+  await mkdir(markers, { recursive: true });
+  const bunfigMarker = join(markers, "bunfig-preload");
+  const optionsMarker = join(markers, "options-preload");
+  const optionsPreload = join(base, "options-preload.ts");
+  const leave = (marker: string) =>
+    `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(marker)}, "ran");\n`;
+  await writeFile(join(cwd, "pre.ts"), leave(bunfigMarker));
+  await writeFile(optionsPreload, leave(optionsMarker));
+  await writeFile(
+    join(cwd, "bunfig.toml"),
+    `preload = ["./pre.ts"]\n\n[define]\n"process.env.ABR_GATE_DEFINE" = "\\"-DEFINED\\""\n`,
+  );
+  await writeFile(join(cwd, ".env.local"), "ABR_GATE_ENVFILE=-ENVFILE\n");
+  return { cwd, bunfigMarker, optionsMarker, bunOptions: `--preload=${optionsPreload.replaceAll("\\", "/")}` };
+}
+// bun test sets NODE_ENV=test, and Bun skips .env.local under it; a host does not set it.
+function hostileEnv(env: Record<string, string>, h: Hostile): Record<string, string> {
+  const { NODE_ENV: _drop, ...rest } = env;
+  return { ...rest, BUN_OPTIONS: h.bunOptions };
+}
+const markersLeft = (h: Hostile) => [h.bunfigMarker, h.optionsMarker].filter((m) => existsSync(m));
+
 describe.skipIf(!GATE)(`phase 2 gate [${H?.STARTER ?? "skipped"}]`, () => {
   let tmp = "";
   let sb: Sandbox;
   let server: FixtureServer | undefined;
   let contextText = "";
+  let hostile: Hostile;
 
   async function sh(cmd: string[], cwd: string, env: Record<string, string>, what: string) {
     const r = await run(cmd, { env, cwd, timeoutMs: 300_000 });
@@ -141,7 +182,10 @@ const mode = process.argv[2];
 const text =
   mode === "large"
     ? "0123456789abcdef-Grüße-\\n".repeat(Math.ceil((256 * 1024) / 24))
-    : ${JSON.stringify(contextText)};
+    : ${JSON.stringify(contextText)} +
+      // empty in a clean run; a project's bunfig [define] or .env.local would fill them (k29)
+      (process.env.ABR_GATE_DEFINE_SEEN ?? "") +
+      (process.env.ABR_GATE_ENVFILE ?? "");
 const code = await main({
     codec: codex,
     handler: ({ invocation }) =>
@@ -162,6 +206,14 @@ else process.exit(code);
     // creeps in fail the install.
     await sh([process.execPath, "install"], root, { ...toolEnv, BUN_CONFIG_REGISTRY: "http://127.0.0.1:9/" }, "bun install");
     await sh([process.execPath, "build", join("src", "entry.ts"), "--target=bun", "--outfile", join("bundle", "entry.js")], root, toolEnv, "bun build");
+    // bun build --target=bun marks the bundle `// @bun`, which Bun's runtime does not transpile
+    // again, so a bunfig [define] cannot rewrite it (executed, Bun 1.4.5). The plain wrapper is
+    // transpiled: with a [define] for process.env.ABR_GATE_DEFINE it hands the rewritten value
+    // to the bundle. Without one (a clean run, or a starter that keeps bunfig out) it hands "".
+    await writeFile(
+      join(root, "bundle", "wrap.js"),
+      `process.env.ABR_GATE_DEFINE_SEEN = process.env.ABR_GATE_DEFINE ?? "";\nawait import("./entry.js");\n`,
+    );
     // only the bundle runs: no node_modules, no sources
     await rm(join(root, "node_modules"), { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     await rm(join(root, "src"), { recursive: true, force: true });
@@ -180,7 +232,10 @@ else process.exit(code);
     server.stop();
     server = undefined;
     sb.mirror = OFFLINE_MIRROR;
-    sb.env = buildEnv(sb);
+    // From here on every hook run starts in the hostile project and carries BUN_OPTIONS.
+    hostile = await makeHostile(join(tmp, "hostile"));
+    sb.cwd = hostile.cwd;
+    sb.env = hostileEnv(buildEnv(sb), hostile);
   }, 600_000);
 
   afterAll(async () => {
@@ -191,10 +246,55 @@ else process.exit(code);
   const runHook = (mode: "context" | "none", stdin: Uint8Array, root = sb.root) =>
     run(starterCmd(root, ["run", ENTRY, mode]), { env: sb.env, cwd: sb.cwd, stdin, timeoutMs: 120_000 });
 
+  const contextInput = () => bytes("input/session-start.startup.json");
+  const contextOut = () => bytes("output/session-start.add-context.out");
+
+  // The control: a raw Bun in a hostile cwd obeys every attack. If this ever passes without
+  // the markers and the tags, the attacks no longer work and the tests below prove nothing.
+  test("control: a raw bun run in the hostile cwd obeys bunfig preload, [define], .env.local and BUN_OPTIONS", async () => {
+    const control = await makeHostile(join(tmp, "control"));
+    const r = await run([process.execPath, "--no-install", join(sb.root, ENTRY), "context"], {
+      env: hostileEnv(sb.env, control),
+      cwd: control.cwd,
+      stdin: await contextInput(),
+      timeoutMs: 120_000,
+    });
+    expect(r.err).toBe("");
+    expect(markersLeft(control)).toEqual([control.bunfigMarker, control.optionsMarker]);
+    expect(r.out).toContain("-DEFINED");
+    expect(r.out).toContain("-ENVFILE");
+    expect(Buffer.from(r.stdout).equals(Buffer.from(await contextOut()))).toBe(false);
+  }, 150_000);
+
+  test("the installing first run and the fast path both ignore the hostile project", async () => {
+    // a fresh slot: the first run installs from the local fixture server, inside the hostile cwd
+    const fresh: Sandbox = { ...sb, home: join(tmp, "getty-home-hostile"), mirror: null, env: {} };
+    const own = await makeHostile(join(tmp, "installing"));
+    const srv = startServer(await realRoutes());
+    try {
+      fresh.mirror = srv.url;
+      fresh.env = hostileEnv(buildEnv(fresh), own);
+      const input = await contextInput();
+      const go = () => run(starterCmd(sb.root, ["run", ENTRY, "context"]), { env: fresh.env, cwd: own.cwd, stdin: input, timeoutMs: 150_000 });
+      const first = await go();
+      expect(srv.archives()).toBe(1); // this run installed
+      expect({ code: first.code, err: first.err }).toEqual({ code: 0, err: "" });
+      expect(Buffer.from(first.stdout).equals(Buffer.from(await contextOut()))).toBe(true);
+      expect(markersLeft(own)).toEqual([]);
+      const second = await go();
+      expect(srv.archives()).toBe(1); // the fast path installed nothing
+      expect({ code: second.code, err: second.err }).toEqual({ code: 0, err: "" });
+      expect(Buffer.from(second.stdout).equals(Buffer.from(await contextOut()))).toBe(true);
+      expect(markersLeft(own)).toEqual([]);
+    } finally {
+      srv.stop();
+    }
+  }, 400_000);
+
   test("the consumer is offline and bundle-only", async () => {
     expect(sb.env.GETTY_BUN_MIRROR).toBe(OFFLINE_MIRROR);
     expect(await readdir(sb.root)).not.toContain("node_modules");
-    const bundle = text(await Bun.file(join(sb.root, "bundle", "entry.js")).bytes());
+    const bundle = text(await Bun.file(join(sb.root, BUNDLE)).bytes());
     // the SDK is inlined: no import or require of it is left (comments may name its path)
     expect(/(?:^|\n)\s*import\b[^\n]*["']@getty\/|require\(["']@getty\//.test(bundle)).toBe(false);
     expect(bundle.includes("class AgentRuntimeError")).toBe(true);
@@ -352,4 +452,8 @@ else process.exit(code);
     expect({ code: r.code, err: r.err }).toEqual({ code: 0, err: "" });
     expect(Buffer.from(r.stdout).equals(Buffer.from(await bytes("output/session-start.add-context.out")))).toBe(true);
   }, 150_000);
+
+  test("no hook run of this file left a bunfig or BUN_OPTIONS preload marker", () => {
+    expect(markersLeft(hostile)).toEqual([]);
+  });
 });
