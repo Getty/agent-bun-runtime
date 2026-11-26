@@ -1,0 +1,13 @@
+---
+class: standard
+created: 2026-11-26T21:23:37Z
+id: 39
+priority: low
+status: backlog
+tags:
+- sdk
+title: 'Codecs: align how tool_input presence is detected'
+updated: 2026-11-26T21:23:37Z
+---
+
+Phase 2b windows review nit: src/codex.ts uses "tool_input" in input, src/claude-code.ts uses input.tool_input !== undefined. Same result for JSON input; align for clarity.
