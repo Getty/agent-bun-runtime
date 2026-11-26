@@ -1,0 +1,34 @@
+---
+claimed_at: 2026-11-26T22:48:58Z
+claimed_by: getty-bun-release-manager
+class: standard
+completed: 2026-11-26T22:48:58Z
+created: 2026-11-26T20:06:08Z
+id: 33
+priority: high
+started: 2026-11-26T20:49:33Z
+status: done
+tags:
+- gate
+- ci
+- phase-2b
+title: 'Phase 2b: gate with Claude Code payloads and a scratch plugin from the install
+  template'
+updated: 2026-11-26T22:48:58Z
+---
+
+Brief point 7. Gate as in phase 2 plus a scratch consumer fed Claude Code payloads (fixtures of the consumers' events) through both starters, run from a hostile project cwd (k29), and a scratch plugin rendered from the install template whose starter runs a hook. CI on all legs.
+
+2026-11-26 20:52 Gate part (a) test/gate/claude-code.test.ts (18 tests), part (b) test/gate/plugin.test.ts (4 tests, env GETTY_BUN_TEST_NUNJUCKS=<dir with node_modules/nunjucks 3.2.4>), shared test/gate/support.ts; gate.test.ts now imports its types and hostile helpers from it. sh/dash gate: 40 pass 0 fail. Proves bundled packed SDK + starter, not a host nor skilletor itself.
+
+CI part: composite action .github/actions/nunjucks (bun add --exact nunjucks@3.2.4 in RUNNER_TEMP/njk, exports GETTY_BUN_TEST_NUNJUCKS) used by scenarios, static and gate jobs; static runs render-template.ts --check and --nunjucks. assert-tests-ran.ts unchanged (no per-leg counts). YAML parsed, not run on a runner; actionlint not installed.
+
+2026-11-26 21:04 Review (getty-bun-reviewer, uncommitted 2b tree on phase-2b-claude-code): local checks green with harness Bun 1.4.5: install --frozen-lockfile (bun.lock unchanged), typecheck, bun test ./test/ 646 pass/49 skip (gate files + Windows-only), gate sh 40/40 (no skip), bootstrap sh 116 pass/20 skip (Windows/real download), render-template --check and --nunjucks, render-pin --check, dash -n, pack --dry-run (dist + README + LICENSE + package.json). No CI run on this diff yet; Windows legs pending. Verdict k33: GO locally (sh); pending a green CI run on all legs (gate powershell/pwsh run plugin.test.ts) and the windows reviewer. Nit: .github/actions/nunjucks/action.yml pins nunjucks 3.2.4 exactly but its transitive deps float (no lockfile).
+
+Re-review (getty-bun-reviewer, uncommitted 2b tree): harness Bun 1.4.5: install --frozen-lockfile, typecheck, bun test ./test/ 606 pass/49 skip/0 fail (fewer tests: the dropped unread-key type tables), gate sh 40/40 no skip, bootstrap CI=1 sh 116 pass/20 skip (Windows, real download), render-template --check and --nunjucks, render-pin --check, dash -n, pack --dry-run (getty-agent-bun-runtime-0.1.0.tgz, dist+README+LICENSE+package.json); dist/ removed. CI on this diff not run yet. Verdict k33: GO for commit conditional on a green CI run on all legs (gate powershell/pwsh run plugin.test.ts). Earlier nit stands: nunjucks action pins 3.2.4 but its transitive deps float.
+
+Committed in 9985a55 (test/gate, .github); stays in review until the CI legs are green
+
+History rewritten, unpushed: test/gate commit is now 7679404 (was 9985a55); .github moved to its own last commit 3b0da63 (workflow scope push is done from another machine). Other new hashes: 2289f03 SDK, 6680f98 skills, 7177039 docs. Backup branch backup/phase-2b-pre-split holds the old hashes.
+
+Phase 2b merged as PR 3 at 4f9c556; CI run 45899184792 green on all 16 jobs.
