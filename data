@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-11-26T21:14:53Z
+claimed_by: main-session
+class: standard
+completed: 2026-11-26T21:14:53Z
+created: 2026-11-26T20:06:11Z
+id: 34
+priority: high
+started: 2026-11-26T20:26:18Z
+status: done
+tags:
+- docs
+- release
+- phase-2b
+title: 'Phase 2b: ADR 0009, plan, README public API, release checklist for 0.1.0'
+updated: 2026-11-26T21:14:53Z
+---
+
+Brief points 8 and 9. ADR 0009 (first release carries the Claude Code codec and the consumer skills; interface decisions; consumers take npm, not a git pin). Plan: goal, parts, phase table with 2b, phase 2 status merged at 0bc8218. README public API and skills. docs/ release checklist (npm by hand by Getty per ADR 0006, then trusted publishing; tag v0.1.0 pins the skills). Changes entry under {{$NEXT}}.
+
+ADR 0009, plan, ADR index/status lines, README intro/status/skills, release checklist, CLAUDE.md, .claude/skilletor.json; to review.
+
+2026-11-26 21:04 Review (getty-bun-reviewer, uncommitted 2b tree on phase-2b-claude-code): local checks green with harness Bun 1.4.5: install --frozen-lockfile (bun.lock unchanged), typecheck, bun test ./test/ 646 pass/49 skip (gate files + Windows-only), gate sh 40/40 (no skip), bootstrap sh 116 pass/20 skip (Windows/real download), render-template --check and --nunjucks, render-pin --check, dash -n, pack --dry-run (dist + README + LICENSE + package.json). No CI run on this diff yet; Windows legs pending. Verdict k34: changes needed. (1) docs/release-0.1.0.md:22,41 name the tarball agent-bun-runtime-0.1.0.tgz; bun pm pack writes getty-agent-bun-runtime-0.1.0.tgz, so the npm publish line fails as written. (2) docs/plan.md:186-190 (SDK interface, phase 2) still says 'The SDK never returns 2' and exports '. and ./codex'; point it to the 2b section. (3) .claude/skilletor.json pins ref v0.1.0, which does not exist before the tag: skilletor sync in this repo cannot fetch the source until then; say so in the checklist or switch after the tag. ADR rule held: 0006/0008 change only status lines. Consumer facts verified at loadguard b517415, skilletor 3641b4b, agent-irc 5f27895. Changes has no 2b entry yet (release manager).
+
+Re-review (getty-bun-reviewer, uncommitted 2b tree): harness Bun 1.4.5: install --frozen-lockfile, typecheck, bun test ./test/ 606 pass/49 skip/0 fail (fewer tests: the dropped unread-key type tables), gate sh 40/40 no skip, bootstrap CI=1 sh 116 pass/20 skip (Windows, real download), render-template --check and --nunjucks, render-pin --check, dash -n, pack --dry-run (getty-agent-bun-runtime-0.1.0.tgz, dist+README+LICENSE+package.json); dist/ removed. CI on this diff not run yet. Verdict k34: GO for commit. Tarball name matches pack output; plan phase-2 SDK section points to the 2b section; skilletor.json note present. Nit: docs/release-0.1.0.md:56-59 sits under 'After the release' though the ref v0.1.0 change lands before the tag.
+
+Committed in 0622a46
