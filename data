@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-26T21:23:31Z
+id: 37
+priority: low
+status: backlog
+tags:
+- bootstrap
+- windows
+title: 'Windows starter: BUN_OPTIONS and bun_options both set under MSYS'
+updated: 2026-11-26T21:23:31Z
+---
+
+Phase 2b windows review N2: getty-bun.ps1 removes BUN_OPTIONS once with [Environment]::SetEnvironmentVariable; if the inherited environment holds both BUN_OPTIONS and bun_options (possible under MSYS/Cygwin), Windows removes only one. Whether Bun on Windows reads the name case-insensitively is not checked. Low risk: the environment comes from the user, not the project. Check on a real Windows host (windows-developer board) and, if needed, remove every case variant.
