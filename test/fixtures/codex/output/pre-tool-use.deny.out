@@ -1,0 +1,1 @@
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"loadguard: the load average is 14.2 on 8 cores, above the limit 12.0.\nWait a minute or run the command with a lower priority (nice -n 19)."}}

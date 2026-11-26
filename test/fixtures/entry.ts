@@ -4,15 +4,18 @@
 // returns the input's "effect" field. That field set to "throw", "throw-typed" or
 // "throw-string" makes the handler throw an Error, an AgentRuntimeError (HOOK_EFFECT_UNSUPPORTED)
 // or a plain string; an absent field makes it return nothing. ABR_TEST_MAX_INPUT_BYTES sets
-// maxInputBytes.
+// maxInputBytes, ABR_TEST_ON_FAILURE sets onFailure (passed as given, so an invalid value
+// reaches main()).
 import { AgentRuntimeError, main, type HookEffect } from "../../src/index.js";
 import { testCodec } from "./codec.js";
 
 const max = process.env.ABR_TEST_MAX_INPUT_BYTES;
+const onFailure = process.env.ABR_TEST_ON_FAILURE;
 
 const code = await main({
   codec: testCodec,
   ...(max === undefined ? {} : { maxInputBytes: Number(max) }),
+  ...(onFailure === undefined ? {} : { onFailure: onFailure as "open" | "closed" }),
   handler: ({ invocation }) => {
     const effect = invocation.native.input.effect;
     if (effect === "throw") throw new Error("handler failed on purpose");

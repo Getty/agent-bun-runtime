@@ -1,0 +1,1 @@
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"rewritten to a non-watching test run","updatedInput":{"command":"npm test -- --run"}}}

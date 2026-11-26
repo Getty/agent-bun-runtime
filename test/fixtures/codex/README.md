@@ -1,20 +1,27 @@
 # Codex hook fixtures
 
 Hook stdin and expected hook stdout for the Codex codec `src/codex.ts` (`SessionStart`,
-`SubagentStart`; card k22), used by `test/codex.test.ts`. None of these fixtures comes from
+`SubagentStart`, card k22; `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, card k30;
+`notify-user` and effect lists, card k26),
+used by `test/codex.test.ts`. None of these fixtures comes from
 a real Codex run: real runs are phase 3a.
 
 **Evidence.** Every fixture is **source-checked** against openai/codex
 `3f65e9f13165d85d1b1fbe20ce06c55758f927b9` (committed 2026-11-25), read in a shallow
 clone and never built or run, except where its row says otherwise
-(`input/subagent-start.extra-field.json` synthetic, `partial/subagent-start.briefing-tests.json`
-from briefing, `output/context.json` encoder input, `entry.ts` a test entry). The `input/`
-files (the synthetic one excepted) and `malformed/session-end.json` are also
+(`input/subagent-start.extra-field.json` and `tolerated/*` synthetic, `partial/subagent-start.briefing-tests.json`
+from briefing, `output/context.json` and the other `output/*.json` encoder inputs,
+`entry.ts` a test entry). The `input/` files (the synthetic one excepted),
+`malformed/session-end.json` and `malformed/pre-tool-use.tool-name-number.json` (which
+fails it on purpose, on `tool_name` alone) are also
 **schema-checked** against the
 schemas Codex generates from the same structs
 (`codex-rs/hooks/schema/generated/*.command.input.schema.json`): every required key, no
-extra key, and the types, `enum` and `const` values the schema gives. The two `.out`
-files are schema-checked against the matching `*.command.output.schema.json`. All paths
+extra key, and the types, `enum` and `const` values the schema gives. Every `.out` file
+but `no-decision.out` is schema-checked against the matching
+`*.command.output.schema.json`, and its bytes equal Python's compact `json.dumps`
+(`ensure_ascii=False`) of the expected object plus LF, built by hand from the encoder
+inputs. Schema checks ran with Python `jsonschema` 4.19.2 (Draft 7). All paths
 below are relative to the Codex repository root.
 
 ## Byte conventions
@@ -62,12 +69,16 @@ below are relative to the Codex repository root.
 | `subagent-start.default-role.json` | Subagent spawned without a role | `agent_type` falls back to `default` (`hook_runtime.rs:1146-1148`, `codex-rs/core/src/agent/role.rs:30`; Codex's own test `codex-rs/core/tests/suite/subagent_notifications.rs:651-652`, `:732-735`) |
 | `subagent-start.minimal.json` | The least Codex sends: all nine keys, `transcript_path` `null` | As `subagent-start.json`; `schema.rs:43-55`, `codex-rs/core/src/session/mod.rs:6354-6366` |
 | `subagent-start.extra-field.json` | **Synthetic.** `subagent-start.json` plus a key Codex does not send for this event at this commit (`agent_transcript_path`, borrowed from `SubagentStopCommandInput`, `schema.rs:607-612`) | Fails Codex's generated schema (`additionalProperties: false`) on purpose: it stands for an additive Codex change, which the proposed decoder tolerates |
+| `user-prompt-submit.json` | A prompt in the root thread | Struct `codex-rs/hooks/src/schema.rs:565-584`, built at `codex-rs/hooks/src/events/user_prompt_submit.rs:83-94`; `prompt` is the text items of the user input, concatenated (`codex-rs/core/src/hook_runtime.rs:731-745`); `agent_id` and `agent_type` left out, as Codex does outside a thread-spawned subagent (`skip_serializing_if`, `schema.rs:572-575`); `turn_id` the turn's id |
+| `pre-tool-use.bash.json` | A shell command before it runs | Struct `schema.rs:276-297`, built at `codex-rs/hooks/src/events/pre_tool_use.rs:181-197`; `tool_name` `Bash` and `tool_input` `{"command": …}` for `exec_command` (`codex-rs/core/src/tools/handlers/unified_exec/exec_command.rs:339-350`, `codex-rs/core/src/tools/hook_names.rs:53-56`); `tool_use_id` is the model's call id (`codex-rs/core/src/tools/registry.rs:1219-1227` via `hook_runtime.rs:212-245`), its `call_…` form synthetic |
+| `pre-tool-use.apply-patch.json` | An edit before it is applied | As `pre-tool-use.bash.json`; `tool_name` `apply_patch` and `tool_input` `{"command": <patch>}` (`codex-rs/core/src/tools/handlers/apply_patch.rs:370-375`, `hook_names.rs:28-39`); the patch follows Codex's grammar (`*** Begin Patch` … `*** End Patch`) |
+| `post-tool-use.bash.json` | The same shell command after it ran | Struct `schema.rs:321-343`, built at `codex-rs/hooks/src/events/post_tool_use.rs:154-170`; for `Bash`, `tool_input` is `{"command": …}` and `tool_response` the command's output as one JSON string (`codex-rs/core/src/tools/context.rs:498-516`, `codex-rs/core/src/tools/handlers/unified_exec.rs:131-149`); the output text is synthetic |
 
 ## partial/: keys Codex always sends, left out
 
 Codex at this commit never sends these objects. The decoder accepts them, with the keys
-missing from the envelope (k22: only `hook_event_name` is required; a present key of the
-event's struct must have its type). The pin is a `main` commit, not the release phase 3a
+missing from the envelope (k22: only `hook_event_name` is required; k30, ADR 0009: a
+present key is type-checked only when the codec lifts it into the envelope). The pin is a `main` commit, not the release phase 3a
 runs (0.153.4), so a real host may omit keys this commit writes; requiring them would cost
 the user the context.
 
@@ -92,9 +103,23 @@ decodes anything; the codec tests can still feed the parsed array to the decoder
 | `not-an-object.json` | A JSON array | Core reader (and decoder): not an object (`HOOK_INPUT_INVALID`) |
 | `missing-hook-event-name.json` | `startup` input without `hook_event_name` | Decoder: no event (`HOOK_INPUT_INVALID`) |
 | `hook-event-name-number.json` | `hook_event_name` is `7` | Decoder: wrong type (`HOOK_INPUT_INVALID`) |
-| `session-end.json` | A real Codex `SessionEnd` input, valid for Codex | Struct `schema.rs:513-524`, `reason` const `other` (`schema.rs:805-807`); decoder: unsupported event (`HOOK_EVENT_UNSUPPORTED`) |
-| `subagent-start.turn-id-number.json` | `turn_id` is `1` | Decoder: wrong type, `schema.rs:553` (`HOOK_INPUT_INVALID`) |
-| `session-start.transcript-path-number.json` | `transcript_path` is `0` | Decoder: string or `null` only, `schema.rs:43-68` (`HOOK_INPUT_INVALID`) |
+| `session-end.json` | A real Codex `SessionEnd` input, valid for Codex | Struct `schema.rs:513-524`, `reason` const `other` (`schema.rs:805-807`); decoder: an event without rules, decoded generically; only `no-decision` encodes (`HOOK_EFFECT_UNSUPPORTED` for add-context) |
+| `subagent-start.turn-id-number.json` | `turn_id` is `1` | Decoder: a lifted key (`hostTurnId`) with the wrong type, `schema.rs:553` (`HOOK_INPUT_INVALID`) |
+| `pre-tool-use.tool-name-number.json` | `pre-tool-use.bash.json` with `tool_name` `7` | Decoder: a lifted key (`tool.name`) with the wrong type, `schema.rs:294` (`HOOK_INPUT_INVALID`) |
+
+## tolerated/: wrong types the decoder lets through
+
+Codex at this commit never sends these objects: each fails the generated schema on one
+key's type. That key is not lifted into the envelope, so the decoder does not check it
+(k30, ADR 0009) and decodes the object like its `input/` original, the key unchanged in
+`native.input`. They stand for a Codex release that changes the type of a key no
+consumer of the envelope reads: that must not make every hook `HOOK_INPUT_INVALID`.
+Both are **synthetic**, derived from a source-checked `input/` fixture.
+
+| File | Case | Follows |
+|---|---|---|
+| `session-start.transcript-path-number.json` | `transcript_path` is `0` | Was in `malformed/` until k30 (`HOOK_INPUT_INVALID` in phase 2); Codex writes a string or `null`, `schema.rs:43-68` |
+| `pre-tool-use.tool-use-id-number.json` | `pre-tool-use.bash.json` with `tool_use_id` `7` | Codex writes a string, `schema.rs:276-297`; the envelope carries `tool` (`Bash`, `{"command": …}`) as for `pre-tool-use.bash.json` |
 
 ## output/: what the encoder writes
 
@@ -103,7 +128,16 @@ decodes anything; the codec tests can still feed the parsed array to the decoder
 | `context.json` | The `add-context` text: quotes, backslashes, newlines, a tab, non-ASCII and an astral character; well-formed UTF-16 | Input to the encoder, not a Codex artifact |
 | `session-start.add-context.out` | `add-context`, audience `model`, placement `session-start-input`, on `SessionStart` | Parsed by `parse_session_start` (`codex-rs/hooks/src/engine/output_parser.rs:93-100`) into `SessionStartCommandOutputWire` (`schema.rs:385-404`); `additionalContext` is used as is, not trimmed (`session_start.rs:264-272`), and recorded as a developer message in the thread (`codex-rs/core/src/context/hook_additional_context.rs:19-42`, `hook_runtime.rs:908-924`) |
 | `subagent-start.add-context.out` | `add-context`, audience `model`, placement `subagent-input`, on `SubagentStart` | Parsed by `parse_subagent_start` (`output_parser.rs:102-109`) into `SubagentStartCommandOutputWire` (`schema.rs:406-425`); recorded in the subagent's thread before its first model request (`hook_runtime.rs:139-201`, `turn.rs:387`) |
-| `no-decision.out` | `no-decision` on either event: zero bytes, exit 0 | Empty or all-whitespace stdout with exit 0 completes the hook without entries (`session_start.rs:243-246`) |
+| `user-prompt-submit.add-context.out` | `add-context`, audience `model`, placement `prompt-input`, on `UserPromptSubmit`, text `context.json` | Parsed by `parse_user_prompt_submit` (`codex-rs/hooks/src/engine/output_parser.rs:266-288`) into `UserPromptSubmitCommandOutputWire` (`schema.rs:427-450`); `additionalContext` becomes a developer message recorded after the prompt (`user_prompt_submit.rs:170-181`, `codex-rs/core/src/session/turn.rs:1215-1245`, `hook_runtime.rs:771-828`) |
+| `post-tool-use.add-context.out` | `add-context`, audience `model`, placement `tool-result`, on `PostToolUse`, text `context.json` | Parsed by `parse_post_tool_use` (`output_parser.rs:207-239`) into `PostToolUseCommandOutputWire` (`schema.rs:143-156`, `:229-240`); recorded as a developer message after the tool's result (`post_tool_use.rs:204-215`, `codex-rs/core/src/tools/registry.rs:1081-1089`) |
+| `pre-tool-use.deny-reason.json` | The `deny` reason, a single JSON string with a newline | Input to the encoder, not a Codex artifact |
+| `pre-tool-use.deny.out` | `tool-permission` `deny` with `pre-tool-use.deny-reason.json`, on `PreToolUse` | Parsed by `parse_pre_tool_use` (`output_parser.rs:121-182`) into `PreToolUseCommandOutputWire` (`schema.rs:128-141`, `:241-256`); a non-empty trimmed `permissionDecisionReason` with `permissionDecision` `deny` blocks the call (`output_parser.rs:144-152`, `:461-471`, `pre_tool_use.rs:248-255`) |
+| `pre-tool-use.bash.updated-input.json` | The `tool-input` input for `Bash`: exactly `{"command": <string>}` | Input to the encoder, not a Codex artifact |
+| `pre-tool-use.bash.tool-input.out` | `tool-input` with `pre-tool-use.bash.updated-input.json`, on `pre-tool-use.bash.json` | As `pre-tool-use.deny.out`; `updatedInput` is taken only with `permissionDecision` `allow` (`output_parser.rs:162-173`, `:444-456`) and, for `Bash`, read as the string `command` into the call's `cmd` (`codex-rs/core/src/tools/handlers/unified_exec/exec_command.rs:370-388`, `codex-rs/core/src/tools/handlers/mod.rs:112-121`); the tool's own approval still runs (`registry.rs:907`, `:1238-1248`) |
+| `notify-user.json` | The `notify-user` text, a single JSON string: quotes, backslashes, a newline and non-ASCII; well-formed UTF-16 | Input to the encoder, not a Codex artifact |
+| `session-start.add-context.notify-user.out` | The list `add-context` (placement `session-start-input`, text `context.json`) plus `notify-user` (text `notify-user.json`), on `SessionStart`; the same bytes for either order of the list | One object, `hookSpecificOutput` first, then the top-level `systemMessage`, a universal field every output wire flattens (`codex-rs/hooks/src/schema.rs:88-100`, `:385-394`); Codex turns it into a `Warning` entry of the hook run (`codex-rs/hooks/src/events/session_start.rs:258-263`), which the TUI prints under the hook's line (`codex-rs/tui/src/history_cell/hook_cell.rs:281-330`); the context as in `session-start.add-context.out` |
+| `user-prompt-submit.add-context.notify-user.out` | The same list with placement `prompt-input`, on `UserPromptSubmit` | As above, with `UserPromptSubmitCommandOutputWire` (`schema.rs:427-440`) and `user_prompt_submit.rs:164-169`; the context as in `user-prompt-submit.add-context.out` |
+| `no-decision.out` | `no-decision` on every event: zero bytes, exit 0 | Empty or all-whitespace stdout with exit 0 completes the hook without entries (`session_start.rs:243-246`, `user_prompt_submit.rs:158-160`, `pre_tool_use.rs:220-222`, `post_tool_use.rs:193-195`) |
 
 ## entry.ts: the end-to-end entry
 
@@ -111,5 +145,6 @@ decodes anything; the codec tests can still feed the parsed array to the decoder
 `test/codex.test.ts` runs as a real Bun process. The test writes a fixture to its stdin
 pipe and closes it, as Codex does on the local path (`command_runner.rs:318-327`); with
 argument `context` the handler answers `add-context` with `output/context.json` at the
-event's placement, with `none` it answers `no-decision`. Every `input/` and `partial/`
-fixture gives the matching `.out` bytes and exit 0.
+event's placement, with `none` it answers `no-decision`. Every `SessionStart` and
+`SubagentStart` fixture in `input/` and `partial/` gives the matching `.out` bytes and
+exit 0. `entry.ts` knows only those two placements (k30 adds the events, not the entry).

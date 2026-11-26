@@ -1,0 +1,16 @@
+{
+  "session-start.add-context.out": { "event": "SessionStart", "effects": [{ "kind": "add-context", "text": "Branch: main\nRules: \"quoted\", back\\slash, tab\there, Grüße, 𝄞", "audience": "model", "placement": "session-start-input" }] },
+  "user-prompt-submit.add-context.out": { "event": "UserPromptSubmit", "effects": [{ "kind": "add-context", "text": "Branch: main\nRules: \"quoted\", back\\slash, tab\there, Grüße, 𝄞", "audience": "model", "placement": "prompt-input" }] },
+  "post-tool-use.add-context.out": { "event": "PostToolUse", "effects": [{ "kind": "add-context", "text": "Branch: main\nRules: \"quoted\", back\\slash, tab\there, Grüße, 𝄞", "audience": "model", "placement": "tool-result" }] },
+  "post-tool-use.add-context.lone-surrogate.out": { "event": "PostToolUse", "effects": [{ "kind": "add-context", "text": "lone \ud800 surrogate", "audience": "model", "placement": "tool-result" }] },
+  "pre-tool-use.allow.out": { "event": "PreToolUse", "effects": [{ "kind": "tool-permission", "decision": "allow" }] },
+  "pre-tool-use.allow-reason.out": { "event": "PreToolUse", "effects": [{ "kind": "tool-permission", "decision": "allow", "reason": "read-only command" }] },
+  "pre-tool-use.deny.out": { "event": "PreToolUse", "effects": [{ "kind": "tool-permission", "decision": "deny", "reason": "Database writes are not allowed" }] },
+  "pre-tool-use.ask.out": { "event": "PreToolUse", "effects": [{ "kind": "tool-permission", "decision": "ask", "reason": "This command deletes files" }] },
+  "pre-tool-use.ask-no-reason.out": { "event": "PreToolUse", "effects": [{ "kind": "tool-permission", "decision": "ask" }] },
+  "pre-tool-use.tool-input.out": { "event": "PreToolUse", "effects": [{ "kind": "tool-input", "input": { "command": "echo LOADGUARD_PROBE_B" } }] },
+  "session-start.add-context.notify-user.out": { "event": "SessionStart", "effects": [{ "kind": "notify-user", "text": "Resuming costs about $0.42 — \"cache\" expired" }, { "kind": "add-context", "text": "Branch: main\nRules: \"quoted\", back\\slash, tab\there, Grüße, 𝄞", "audience": "model", "placement": "session-start-input" }] },
+  "notify-user.out": { "event": ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "CwdChanged"], "effects": [{ "kind": "notify-user", "text": "Synced 2 skills in /home/dev/project" }] },
+  "pre-tool-use.allow.tool-input.out": { "event": "PreToolUse", "effects": [{ "kind": "tool-input", "input": { "command": "npm test -- --run" } }, { "kind": "tool-permission", "decision": "allow", "reason": "rewritten to a non-watching test run" }] },
+  "no-decision.out": { "event": "*", "effects": [{ "kind": "no-decision" }] }
+}

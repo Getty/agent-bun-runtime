@@ -227,7 +227,7 @@ describe("stdin of an entry: one complete JSON object, not to EOF", () => {
 
 describe("every SDK failure in a real process: exit 1, one stderr line, empty stdout", () => {
   const cases: Array<[string, object, string, string]> = [
-    ["decode error: event the codec does not handle", { hook_event_name: "PreToolUse" }, "HOOK_EVENT_UNSUPPORTED", "PreToolUse"],
+    ["encode error: add-context for an event the (stand-in) codec has no rules for, decoded generically", { hook_event_name: "Stop", effect: { kind: "add-context", text: "x", audience: "model", placement: "subagent-input" } }, "HOOK_EFFECT_UNSUPPORTED", "Stop"],
     ["decode error: malformed host object", { cwd: "/x" }, "HOOK_INPUT_INVALID", "hook_event_name"],
     ["handler throws an Error", { hook_event_name: "SubagentStart", effect: "throw" }, "HANDLER_FAILED", "handler failed on purpose"],
     ["handler throws a non-Error value", { hook_event_name: "SubagentStart", effect: "throw-string" }, "HANDLER_FAILED", "plain string on purpose"],
@@ -243,6 +243,45 @@ describe("every SDK failure in a real process: exit 1, one stderr line, empty st
       failure(code, part, await runWithOpenStdin("exit", input));
     }, TEST_BOUND_MS);
   }
+});
+
+// onFailure in a real process (ADR 0009): "closed" exits 2 with the line "open" exits 1 with;
+// an invalid value is an INTERNAL_ERROR before stdin is read, so it ends although nothing
+// was written to the open stdin pipe.
+describe("onFailure in a real process", () => {
+  const FAILING = { hook_event_name: "SubagentStart", effect: "throw" };
+  const withPolicy = (onFailure: string, input: object = FAILING) =>
+    runEntry({ chunks: [`${JSON.stringify(input)}\n`], env: { ABR_TEST_ON_FAILURE: onFailure } });
+
+  test("open: exit 1, one HANDLER_FAILED line", async () => {
+    failure("HANDLER_FAILED", "handler failed on purpose", await withPolicy("open"));
+  }, TEST_BOUND_MS);
+
+  test("closed: exit 2, the same one line, empty stdout", async () => {
+    const open = await withPolicy("open");
+    const closed = await withPolicy("closed");
+    expect(closed.code).toBe(2);
+    expect(closed.stdout).toBe("");
+    expect(closed.stderr).toBe(open.stderr);
+    expect(closed.stderr).toMatch(/^agent-bun-runtime: HANDLER_FAILED: handler failed on purpose\n$/);
+  }, TEST_BOUND_MS);
+
+  test("closed: an input failure is exit 2 as well", async () => {
+    const run = await runEntry({ chunks: ["[1]\n"], env: { ABR_TEST_ON_FAILURE: "closed" } });
+    expect(run.code).toBe(2);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toStartWith("agent-bun-runtime: HOOK_INPUT_INVALID: ");
+  }, TEST_BOUND_MS);
+
+  test("closed: a success is still exit 0 with the output", async () => {
+    const run = await withPolicy("closed", ADD_CONTEXT);
+    expect(run).toEqual(OK);
+  }, TEST_BOUND_MS);
+
+  test("an invalid value: exit 1 and INTERNAL_ERROR with nothing on stdin and the pipe open", async () => {
+    const run = await runEntry({ chunks: [], env: { ABR_TEST_ON_FAILURE: "CLOSED" } });
+    failure("INTERNAL_ERROR", 'onFailure must be "open" or "closed", got "CLOSED"', run);
+  }, TEST_BOUND_MS);
 });
 
 describe("large output", () => {

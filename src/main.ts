@@ -1,14 +1,27 @@
-import type { HookCodec } from "./codec.js";
+import { codecImplementation, type HookCodec } from "./codec.js";
 import type { Env, HookContext } from "./context.js";
-import { validateEffect, type HookEffect } from "./effects.js";
+import { validateEffects, type HookEffect } from "./effects.js";
 import { AgentRuntimeError, type ErrorCode, type ErrorStage } from "./errors.js";
 import { readJsonObject } from "./input.js";
 import { writeOutput, writeStdout, type OutputWriter } from "./output.js";
 
-/** The plugin's logic for one invocation. */
-export type HookHandler = (context: HookContext) => HookEffect | Promise<HookEffect>;
+/**
+ * The plugin's logic for one invocation: one effect, or a non-empty list with at most one
+ * effect of each kind, `no-decision` only alone. The codec delivers a list as one output.
+ */
+export type HookHandler = (
+  context: HookContext,
+) => HookEffect | readonly HookEffect[] | Promise<HookEffect | readonly HookEffect[]>;
+
+/**
+ * What `main()` exits with on failure: `"open"` exits 1, so the host goes on (a
+ * `PreToolUse` tool runs); `"closed"` exits 2, which Codex and Claude Code read as a block
+ * on `PreToolUse` and `UserPromptSubmit`. Both write the same one stderr line.
+ */
+export type FailurePolicy = "open" | "closed";
 
 export interface MainOptions {
+  /** One of this package's codecs, e.g. `codex` from `@getty/agent-bun-runtime/codex`. */
   readonly codec: HookCodec;
   readonly handler: HookHandler;
   /** Default: `Bun.stdin.stream()`. */
@@ -23,25 +36,44 @@ export interface MainOptions {
   readonly cwd?: string;
   /** Bound for the hook object on stdin; default `DEFAULT_MAX_INPUT_BYTES` (1 MiB). */
   readonly maxInputBytes?: number;
+  /** Exit code on failure; default `"open"` (exit 1). */
+  readonly onFailure?: FailurePolicy;
 }
 
 const encoder = new TextEncoder();
 
 /**
  * Runs one hook invocation and returns the exit code; it never calls `process.exit`.
- * Reads one JSON object from stdin, decodes it, runs the handler, validates the effect,
- * encodes it and writes stdout once. Returns 0 when the effect was encoded and written;
- * 1 for every failure, after exactly one stderr line `agent-bun-runtime: <CODE>: <message>`
- * and with nothing on stdout. Never 2: some hosts read 2 as a block.
+ * Reads one JSON object from stdin, decodes it, runs the handler, validates the effect
+ * or effects, encodes them as one output and writes stdout once. Returns 0 when the
+ * output was encoded and written.
+ * Every failure writes exactly one stderr line `agent-bun-runtime: <CODE>: <message>` and
+ * returns 1, or 2 with `onFailure: "closed"`; 2 only then, since hosts read 2 as a block.
+ * Nothing reaches stdout unless the failure is in writing it (`OUTPUT_FAILED`). An
+ * `onFailure` other than `"open"` or `"closed"` is a programming error: `INTERNAL_ERROR`
+ * and exit 1, before stdin is read, since the intended policy is unknown.
  */
 export async function main(options: MainOptions): Promise<number> {
   const writeError = options.stderr ?? writeStderr;
+  const policy: unknown = options.onFailure ?? "open";
+  if (policy !== "open" && policy !== "closed") {
+    await report(
+      writeError,
+      new AgentRuntimeError(
+        "INTERNAL_ERROR",
+        "input",
+        `main(): onFailure must be "open" or "closed", got ${describeValue(policy)}`,
+      ),
+    );
+    return 1;
+  }
+  const failed = policy === "closed" ? 2 : 1;
   let output: Uint8Array;
   try {
     output = await respond(options);
   } catch (error) {
     await report(writeError, error);
-    return 1;
+    return failed;
   }
   try {
     await writeOutput(output, options.stdout ?? writeStdout);
@@ -50,26 +82,27 @@ export async function main(options: MainOptions): Promise<number> {
       writeError,
       new AgentRuntimeError("OUTPUT_FAILED", "output", `stdout could not be written: ${describe(cause)}`, { cause }),
     );
-    return 1;
+    return failed;
   }
   return 0;
 }
 
 async function respond(options: MainOptions): Promise<Uint8Array> {
+  const codec = codecImplementation(options.codec);
   const input = await step("input", () =>
     readJsonObject(
       options.stdin ?? Bun.stdin.stream(),
       options.maxInputBytes === undefined ? {} : { maxBytes: options.maxInputBytes },
     ),
   );
-  const invocation = await step("decode", () => options.codec.decode(input, { processCwd: options.cwd ?? process.cwd() }));
+  const invocation = await step("decode", () => codec.decode(input, { processCwd: options.cwd ?? process.cwd() }));
   const context: HookContext = Object.freeze({ invocation, env: options.env ?? process.env });
-  const effect = validateEffect(await step("handler", () => options.handler(context)));
+  const effects = validateEffects(await step("handler", () => options.handler(context)));
   const text = await step("encode", () => {
-    const encoded = options.codec.encode(effect, invocation);
+    const encoded = codec.encode(effects, invocation);
     if (typeof encoded !== "string") throw new Error("the codec returned no string");
-    if (encoded === "" && effect.kind !== "no-decision") {
-      throw new Error(`the codec returned no output for ${effect.kind}`);
+    if (encoded === "" && effects[0]?.kind !== "no-decision") {
+      throw new Error(`the codec returned no output for ${effects.map(({ kind }) => kind).join(", ")}`);
     }
     return encoded;
   });
@@ -104,6 +137,12 @@ async function report(writeError: (text: string) => unknown, error: unknown): Pr
 
 async function writeStderr(text: string): Promise<void> {
   await Bun.write(Bun.stderr, text);
+}
+
+function describeValue(value: unknown): string {
+  if (typeof value === "string") return JSON.stringify(value);
+  if (value === null) return "null";
+  return typeof value === "object" ? "an object" : String(value);
 }
 
 function describe(value: unknown): string {

@@ -17,7 +17,7 @@ describe("createInvocation", () => {
       nativeInput,
     });
     expect(invocation).toEqual({
-      contractVersion: 1,
+      envelopeVersion: 1,
       host,
       event: { nativeName: "SubagentStart" },
       location: { processCwd: "/consumer", hostWorkingDirectory: "/project" },
@@ -60,6 +60,66 @@ describe("createInvocation", () => {
       (invocation.native.input.nested as { list: unknown[] }).list[0],
     ]) {
       expect(Object.isFrozen(part)).toBe(true);
+    }
+  });
+
+  test("envelopeVersion is 1 and the old contractVersion is gone", () => {
+    const invocation = createInvocation({ host, nativeEvent: "SessionStart", processCwd: "/consumer", nativeInput: {} });
+    expect(invocation.envelopeVersion).toBe(1);
+    expect("contractVersion" in invocation).toBe(false);
+    expect(Object.keys(invocation)).toEqual(["envelopeVersion", "host", "event", "location", "identity", "native"]);
+  });
+
+  test("tool is absent, not undefined, when the codec gave none", () => {
+    const base = { host, nativeEvent: "PreToolUse", processCwd: "/consumer", nativeInput: {} };
+    for (const invocation of [createInvocation(base), createInvocation({ ...base, tool: undefined })]) {
+      expect("tool" in invocation).toBe(false);
+      expect(invocation.tool).toBeUndefined();
+    }
+  });
+
+  test("tool is {name, input} when given, frozen with its input deep-frozen in place", () => {
+    const toolInput = { command: "ls", options: { flags: ["-l", { deep: true }] } };
+    const invocation = createInvocation({
+      host,
+      nativeEvent: "PreToolUse",
+      processCwd: "/consumer",
+      tool: { name: "Bash", input: toolInput },
+      nativeInput: {},
+    });
+    expect(invocation.tool).toStrictEqual({ name: "Bash", input: toolInput });
+    expect(invocation.tool?.input).toBe(toolInput);
+    const options = toolInput.options as { flags: unknown[] };
+    for (const part of [invocation.tool, toolInput, toolInput.options, options.flags, options.flags[1]]) {
+      expect(Object.isFrozen(part)).toBe(true);
+    }
+    expect(() => {
+      (toolInput as { command: string }).command = "rm";
+    }).toThrow();
+  });
+
+  test("a tool whose input is a string, a number or null is kept as given", () => {
+    for (const input of ["text", 7, null, ["a"]]) {
+      const invocation = createInvocation({
+        host,
+        nativeEvent: "PostToolUse",
+        processCwd: "/consumer",
+        tool: { name: "Custom", input },
+        nativeInput: {},
+      });
+      expect(invocation.tool).toStrictEqual({ name: "Custom", input });
+    }
+  });
+
+  test("the host kinds codex and claude-code both build an envelope", () => {
+    for (const kind of ["codex", "claude-code"] as const) {
+      const invocation = createInvocation({
+        host: { kind, surface: "command-hook" },
+        nativeEvent: "SessionStart",
+        processCwd: "/consumer",
+        nativeInput: {},
+      });
+      expect(invocation.host).toStrictEqual({ kind, surface: "command-hook" });
     }
   });
 });

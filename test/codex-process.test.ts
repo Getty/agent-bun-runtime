@@ -90,8 +90,8 @@ describe("every malformed/ fixture through the Codex entry: exit 1, empty stdout
     ["malformed/missing-hook-event-name.json", "HOOK_INPUT_INVALID", false],
     ["malformed/hook-event-name-number.json", "HOOK_INPUT_INVALID", false],
     ["malformed/subagent-start.turn-id-number.json", "HOOK_INPUT_INVALID", false],
-    ["malformed/session-start.transcript-path-number.json", "HOOK_INPUT_INVALID", false],
-    ["malformed/session-end.json", "HOOK_EVENT_UNSUPPORTED", false],
+    ["malformed/pre-tool-use.tool-name-number.json", "HOOK_INPUT_INVALID", false],
+    ["malformed/session-end.json", "HOOK_EFFECT_UNSUPPORTED", false],
   ];
   for (const [file, code, close] of cases) {
     test(`${file}: ${code}`, async () => {

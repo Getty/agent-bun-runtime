@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as codexModule from "../src/codex.js";
 import { codex } from "../src/codex.js";
+import { codecImplementation } from "../src/codec.js";
 import { createInvocation } from "../src/context.js";
 import { AgentRuntimeError, main, type HookEffect, type HookInvocation } from "../src/index.js";
 
@@ -32,8 +33,10 @@ async function fixtureBytes(path: string): Promise<Uint8Array<ArrayBuffer>> {
 
 const CONTEXT_TEXT = (await Bun.file(join(FIXTURES, "output", "context.json")).json()) as string;
 
+const codexImplementation = codecImplementation(codex);
+
 function decode(input: Input): HookInvocation {
-  return codex.decode(input, { processCwd: PROCESS_CWD });
+  return codexImplementation.decode(input, { processCwd: PROCESS_CWD });
 }
 
 function caught(run: () => unknown): AgentRuntimeError {
@@ -92,7 +95,7 @@ describe("decode", () => {
     const input = await fixture(path);
     const invocation = decode(input);
     expect(invocation).toStrictEqual({
-      contractVersion: 1,
+      envelopeVersion: 1,
       host: { kind: "codex", surface: "command-hook" },
       event: { nativeName: "SessionStart" },
       location: { processCwd: PROCESS_CWD, hostWorkingDirectory: input.cwd as string },
@@ -107,7 +110,7 @@ describe("decode", () => {
     const input = await fixture(path);
     const invocation = decode(input);
     expect(invocation).toStrictEqual({
-      contractVersion: 1,
+      envelopeVersion: 1,
       host: { kind: "codex", surface: "command-hook" },
       event: { nativeName: "SubagentStart" },
       location: { processCwd: PROCESS_CWD, hostWorkingDirectory: input.cwd as string },
@@ -181,31 +184,55 @@ describe("decode", () => {
     expect(decode(subagent).native.input.source).toBe(5);
   });
 
-  const SESSION_KEYS = ["session_id", "transcript_path", "cwd", "model", "permission_mode", "source"];
-  const SUBAGENT_KEYS = [
-    "session_id",
-    "turn_id",
-    "transcript_path",
-    "cwd",
-    "model",
-    "permission_mode",
-    "agent_id",
-    "agent_type",
-  ];
+  // Lifted keys: session_id and cwd on both events, turn_id on SubagentStart only (ADR 0009).
+  const LIFTED = [
+    ["input/session-start.startup.json", "session_id"],
+    ["input/session-start.startup.json", "cwd"],
+    ["input/subagent-start.json", "session_id"],
+    ["input/subagent-start.json", "cwd"],
+    ["input/subagent-start.json", "turn_id"],
+  ] as const;
+  // Every other key is unchecked: any value stays in native.input and the envelope is unchanged.
+  const UNCHECKED = [
+    ["input/session-start.startup.json", "transcript_path"],
+    ["input/session-start.startup.json", "model"],
+    ["input/session-start.startup.json", "permission_mode"],
+    ["input/session-start.startup.json", "source"],
+    ["input/subagent-start.json", "transcript_path"],
+    ["input/subagent-start.json", "model"],
+    ["input/subagent-start.json", "agent_id"],
+    ["input/subagent-start.json", "agent_type"],
+  ] as const;
   const WRONG: unknown[] = [1, true, null, [], {}];
-  const cases = [
-    ...SESSION_KEYS.map((key) => ["input/session-start.startup.json", key] as const),
-    ...SUBAGENT_KEYS.map((key) => ["input/subagent-start.json", key] as const),
-  ];
 
-  test.each(cases)("%s: a wrong type for %s is HOOK_INPUT_INVALID", async (path, key) => {
+  test.each(LIFTED)("%s: a wrong type for the lifted key %s, null included, is HOOK_INPUT_INVALID", async (path, key) => {
     for (const value of WRONG) {
-      if (key === "transcript_path" && value === null) continue;
       const input = await fixture(path);
       input[key] = value;
       const error = expectError(() => decode(input), "HOOK_INPUT_INVALID", "decode");
       expect(error.message).toContain(key);
     }
+  });
+
+  test.each(UNCHECKED)("%s: any value for the unchecked key %s is accepted and kept unchanged in native.input", async (path, key) => {
+    const base = await fixture(path);
+    const { native: _b, ...baseEnvelope } = decode(base);
+    for (const value of [...WRONG, "x"]) {
+      const input = { ...base, [key]: value };
+      const invocation = decode(input);
+      const { native: _n, ...envelope } = invocation;
+      expect(envelope).toStrictEqual(baseEnvelope);
+      expect(invocation.native.input[key]).toStrictEqual(value);
+    }
+  });
+
+  test.each(["tolerated/session-start.transcript-path-number.json"])("%s: decodes, the odd value kept unchanged in native.input", async (path) => {
+    const input = await fixture(path);
+    const invocation = decode(input);
+    expect(invocation.native.input).toStrictEqual(input);
+    expect(invocation.identity).toStrictEqual({ hostSessionId: input.session_id as string });
+    expect(invocation.location).toStrictEqual({ processCwd: PROCESS_CWD, hostWorkingDirectory: input.cwd as string });
+    expect(invocation.native.input.transcript_path).toBe(0);
   });
 
   test("transcript_path null is accepted and means missing", async () => {
@@ -219,19 +246,16 @@ describe("decode", () => {
     ["malformed/missing-hook-event-name.json", "HOOK_INPUT_INVALID"],
     ["malformed/hook-event-name-number.json", "HOOK_INPUT_INVALID"],
     ["malformed/subagent-start.turn-id-number.json", "HOOK_INPUT_INVALID"],
-    ["malformed/session-start.transcript-path-number.json", "HOOK_INPUT_INVALID"],
     ["malformed/not-an-object.json", "HOOK_INPUT_INVALID"],
-    ["malformed/session-end.json", "HOOK_EVENT_UNSUPPORTED"],
   ])("%s: %s", async (path, code) => {
     const input = await fixture(path);
     expectError(() => decode(input), code, "decode");
   });
 
-  test.each(["", "sessionstart", "SessionEnd", "UserPromptSubmit", "SubagentStop"])(
-    "event %p is HOOK_EVENT_UNSUPPORTED",
+  test.each(["", "sessionstart", "SessionEnd", "SubagentStop", "Stop", "PreCompact"])(
+    "event %p is decoded generically",
     (event) => {
-      const error = expectError(() => decode({ hook_event_name: event }), "HOOK_EVENT_UNSUPPORTED", "decode");
-      expect(error.message).toContain(JSON.stringify(event));
+      expect(decode({ hook_event_name: event }).event.nativeName).toBe(event);
     },
   );
 });
@@ -240,7 +264,7 @@ describe("encode", () => {
   test("no-decision is empty on both events", async () => {
     expect(await fixtureBytes("output/no-decision.out")).toEqual(new Uint8Array(0));
     for (const path of ["input/session-start.startup.json", "input/subagent-start.json"]) {
-      expect(codex.encode({ kind: "no-decision" }, decode(await fixture(path)))).toBe("");
+      expect(codexImplementation.encode([{ kind: "no-decision" }], decode(await fixture(path)))).toBe("");
     }
   });
 
@@ -248,7 +272,7 @@ describe("encode", () => {
     ["input/session-start.startup.json", "session-start-input", "output/session-start.add-context.out"],
     ["input/subagent-start.json", "subagent-input", "output/subagent-start.add-context.out"],
   ] as const)("%s, add-context at %s: the bytes of %s", async (path, placement, out) => {
-    const text = codex.encode(addContext(placement), decode(await fixture(path)));
+    const text = codexImplementation.encode([addContext(placement)], decode(await fixture(path)));
     expect(enc.encode(text)).toEqual(await fixtureBytes(out));
   });
 
@@ -257,7 +281,7 @@ describe("encode", () => {
       ["input/session-start.startup.json", "SessionStart", "session-start-input"],
       ["input/subagent-start.json", "SubagentStart", "subagent-input"],
     ] as const) {
-      const text = codex.encode(addContext(placement), decode(await fixture(path)));
+      const text = codexImplementation.encode([addContext(placement)], decode(await fixture(path)));
       expect(text.endsWith("}\n")).toBe(true);
       expect(text.indexOf("\n")).toBe(text.length - 1);
       expect(JSON.parse(text)).toStrictEqual({
@@ -269,7 +293,7 @@ describe("encode", () => {
   test("text that looks like JSON or has outer whitespace stays a JSON string, unchanged", async () => {
     const invocation = decode(await fixture("input/session-start.startup.json"));
     for (const text of ['{"continue":false}', "[1]", "  padded\n\n", "🚀"]) {
-      const out = codex.encode(addContext("session-start-input", text), invocation);
+      const out = codexImplementation.encode([addContext("session-start-input", text)], invocation);
       expect((JSON.parse(out) as { hookSpecificOutput: { additionalContext: string } }).hookSpecificOutput.additionalContext).toBe(text);
     }
   });
@@ -279,7 +303,7 @@ describe("encode", () => {
     ["input/subagent-start.json", "session-start-input"],
   ] as const)("%s: placement %s is HOOK_EFFECT_UNSUPPORTED", async (path, placement) => {
     const invocation = decode(await fixture(path));
-    const error = expectError(() => codex.encode(addContext(placement), invocation), "HOOK_EFFECT_UNSUPPORTED", "encode");
+    const error = expectError(() => codexImplementation.encode([addContext(placement)], invocation), "HOOK_EFFECT_UNSUPPORTED", "encode");
     expect(error.message).toContain(placement);
   });
 
@@ -287,26 +311,25 @@ describe("encode", () => {
     "an unpaired surrogate is HOOK_EFFECT_UNSUPPORTED (%#)",
     async (text) => {
       const invocation = decode(await fixture("input/subagent-start.json"));
-      expectError(() => codex.encode(addContext("subagent-input", text), invocation), "HOOK_EFFECT_UNSUPPORTED", "encode");
+      expectError(() => codexImplementation.encode([addContext("subagent-input", text)], invocation), "HOOK_EFFECT_UNSUPPORTED", "encode");
     },
   );
 
-  test("an invocation of another event is HOOK_EFFECT_UNSUPPORTED, no-decision included", () => {
+  test("an invocation of another event: no-decision is empty, add-context HOOK_EFFECT_UNSUPPORTED", () => {
     const invocation = createInvocation({
       host: { kind: "codex", surface: "command-hook" },
       nativeEvent: "SessionEnd",
       processCwd: PROCESS_CWD,
       nativeInput: { hook_event_name: "SessionEnd" },
     });
-    for (const effect of [{ kind: "no-decision" } as const, addContext("session-start-input")]) {
-      expectError(() => codex.encode(effect, invocation), "HOOK_EFFECT_UNSUPPORTED", "encode");
-    }
+    expect(codexImplementation.encode([{ kind: "no-decision" }], invocation)).toBe("");
+    expectError(() => codexImplementation.encode([addContext("session-start-input")], invocation), "HOOK_EFFECT_UNSUPPORTED", "encode");
   });
 
   test("an effect kind outside the vocabulary is HOOK_EFFECT_UNSUPPORTED", async () => {
     const invocation = decode(await fixture("input/session-start.startup.json"));
     const effect = { kind: "deny-pending-tool", reason: "x" } as unknown as HookEffect;
-    expectError(() => codex.encode(effect, invocation), "HOOK_EFFECT_UNSUPPORTED", "encode");
+    expectError(() => codexImplementation.encode([effect], invocation), "HOOK_EFFECT_UNSUPPORTED", "encode");
   });
 });
 
@@ -354,8 +377,7 @@ describe("main() with the Codex codec", () => {
     ["malformed/missing-hook-event-name.json", "HOOK_INPUT_INVALID"],
     ["malformed/hook-event-name-number.json", "HOOK_INPUT_INVALID"],
     ["malformed/subagent-start.turn-id-number.json", "HOOK_INPUT_INVALID"],
-    ["malformed/session-start.transcript-path-number.json", "HOOK_INPUT_INVALID"],
-    ["malformed/session-end.json", "HOOK_EVENT_UNSUPPORTED"],
+    ["malformed/session-end.json", "HOOK_EFFECT_UNSUPPORTED"],
   ])("%s: exit 1, %s, no stdout", async (path, code) => {
     const result = await runMain(await fixtureBytes(path), byEvent);
     expect(result.code).toBe(1);
@@ -438,7 +460,7 @@ describe("end to end: an entry on main({ codec: codex, handler }) through a pipe
     const result = await runEntry("context", await fixtureBytes("malformed/session-end.json"));
     expect(result.code).toBe(1);
     expect(result.stdout).toEqual(new Uint8Array(0));
-    expect(result.stderr).toStartWith("agent-bun-runtime: HOOK_EVENT_UNSUPPORTED: ");
+    expect(result.stderr).toStartWith("agent-bun-runtime: HOOK_EFFECT_UNSUPPORTED: ");
     expect(result.stderr.indexOf("\n")).toBe(result.stderr.length - 1);
   }, ENTRY_TEST_TIMEOUT_MS);
 });

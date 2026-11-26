@@ -19,6 +19,10 @@
     "./codex": {
       "types": "./dist/codex.d.ts",
       "default": "./dist/codex.js"
+    },
+    "./claude-code": {
+      "types": "./dist/claude-code.d.ts",
+      "default": "./dist/claude-code.js"
     }
   },
   "files": [
