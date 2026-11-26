@@ -12,6 +12,7 @@ interface: [docs/plan.md](../docs/plan.md), "Starter interface (MVP)". Decisions
 | `versions.json` | The reviewed version table: per Bun version and target the archive, its SHA256 and the single expected member |
 | `render-pin.ts` | The pin render: writes the pin block for one version into the starters, or checks them |
 | `getty-bun.sh`, `getty-bun.ps1` | The starters (POSIX `sh`, Windows PowerShell 5.1 and 7); each carries one pin block |
+| `render-template.ts` | Generates the starters of the skilletor template `getty-bun-install` (`skills/getty-bun-install/bootstrap/*.njk`) from the starters and the whole table, or checks them |
 
 This README is the contract the starters and the scenario suite code against: the table
 fields, the pin block format, the render CLI, the receipt and the `.installing` record
@@ -160,7 +161,8 @@ gpgconf --kill all; rm -rf "$GNUPGHOME"; unset GNUPGHOME
   signature from any other key fails it.
 - A bad signature, a fingerprint mismatch or a checksum mismatch stops the addition.
 - Add the entry to `versions.json`, extend the verified-versions table above, render the
-  starters for the new version and run the scenario suite against them. The commit names
+  starters for the new version and run the scenario suite against them. Regenerate the
+  template with `render-template.ts`: it embeds every version of the table. The commit names
   the verification (signer fingerprint, signature date, GnuPG version).
 
 ## Pin block
@@ -256,6 +258,41 @@ Failures, each one line; all but a write error are found before any file is writ
 - `cannot read file <path>`, `cannot write file <path>`
 
 Only the selected version's entry is validated.
+
+## Template render: `render-template.ts`
+
+```
+bun bootstrap/render-template.ts [--check] [--nunjucks DIR]
+```
+
+Writes `skills/getty-bun-install/bootstrap/getty-bun.sh.njk` and `getty-bun.ps1.njk`
+from `getty-bun.sh`, `getty-bun.ps1` and `versions.json` (fixed paths), exec bit taken
+from the starter. Each `.njk` is the starter in nunjucks `{% raw %}` regions, its pin
+block replaced by a lookup of `vars.bun_version` in a table of the rendered pin block of
+every version (keys `"pin <version>"`: no `Object.prototype` member has a space). A
+missing `vars.bun_version` or one not in the table calls the undefined function
+`vars_bun_version_is_missing_or_not_in_the_getty_bun_install_version_table`, so the
+render fails with that name in the message (skilletor renders with
+`throwOnUndefined`, which alone would only catch printing an undefined value). A starter
+that contains a nunjucks raw tag cannot be quoted and fails the generation. Every
+version is validated as `render-pin.ts` validates the selected one.
+
+- `--check`: writes nothing; exit 1 when a `.njk` differs from a fresh generation (text
+  or exec bit). The gate against drift between `bootstrap/` and the template.
+- `--nunjucks DIR`: a nunjucks package directory (skilletor uses nunjucks `^3.2.4`; the
+  repository has no nunjucks dependency, so install it in a scratch directory under
+  `.dev/`). After generating or checking, renders each `.njk` as skilletor does
+  (`autoescape: false`, `throwOnUndefined: true`, context `{ vars }`) and fails unless
+  every table version renders byte for byte to the starter with that version's pin
+  block, the starter's own pin renders to the starter file itself, and `vars` without
+  `bun_version`, with `0.0.0-unknown` and with `constructor` fail with the name above.
+
+```sh
+mkdir -p .dev/njk && (cd .dev/njk && echo '{"private":true}' >package.json && ../harness/bun add nunjucks@3.2.4)
+.dev/harness/bun bootstrap/render-template.ts --check --nunjucks .dev/njk/node_modules/nunjucks
+```
+
+Exit 0 when everything holds; otherwise 1 with one `getty-bun: ` stderr line per finding.
 
 ## Slot and receipt
 

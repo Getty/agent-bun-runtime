@@ -23,7 +23,7 @@ const ARCHIVE_RE = /^[0-9A-Za-z._-]+\.zip$/;
 const SHA256_RE = /^[0-9a-f]{64}$/;
 const SEGMENT_RE = /^[0-9A-Za-z._-]+$/;
 
-class Failure extends Error {}
+export class Failure extends Error {}
 
 function fail(message: string): never {
   throw new Failure(message);
@@ -61,7 +61,7 @@ function readText(path: string, what: string): string {
   }
 }
 
-function renderBlock(tablePath: string, version: string): string {
+export function renderBlock(tablePath: string, version: string): string {
   let table: any;
   try {
     table = JSON.parse(readText(tablePath, "table"));
@@ -104,7 +104,7 @@ function renderBlock(tablePath: string, version: string): string {
   return lines.join("\n");
 }
 
-function replaceBlock(path: string, text: string, block: string): string {
+export function replaceBlock(path: string, text: string, block: string): string {
   const lines = text.split("\n");
   const begins = lines.flatMap((l, i) => (l === BEGIN ? [i] : []));
   const ends = lines.flatMap((l, i) => (l === END ? [i] : []));
@@ -143,12 +143,15 @@ function main(argv: string[]): number {
   return 0;
 }
 
-let code: number;
-try {
-  code = main(process.argv.slice(2));
-} catch (e) {
-  const message = e instanceof Failure ? e.message : String(e);
-  console.error(`getty-bun: ${message.replace(/\s*\n\s*/g, " ")}`);
-  code = 1;
+// Run as a script; bootstrap/render-template.ts imports renderBlock and replaceBlock.
+if (import.meta.main) {
+  let code: number;
+  try {
+    code = main(process.argv.slice(2));
+  } catch (e) {
+    const message = e instanceof Failure ? e.message : String(e);
+    console.error(`getty-bun: ${message.replace(/\s*\n\s*/g, " ")}`);
+    code = 1;
+  }
+  process.exit(code);
 }
-process.exit(code);
