@@ -19,62 +19,14 @@
 // processes the harness or this file started are killed (killTree, by recorded handle).
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { cp, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
-import { existsSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
-// The scenario suite's helpers (bootstrap/test/lib/harness.ts) are not typed under this
-// package's strict tsconfig, so they are loaded by a computed path and typed here by what
-// the gate uses. They load only when the gate runs: importing them registers an afterEach
-// that is harmless for this file (its own temp dirs go in its afterAll).
-interface RunResult {
-  code: number | null;
-  stdout: Uint8Array;
-  out: string;
-  err: string;
-  timedOut: boolean;
-}
-interface Sandbox {
-  tmp: string;
-  home: string;
-  userHome: string;
-  root: string;
-  cwd: string;
-  mirror: string | null;
-  env: Record<string, string>;
-}
-interface FixtureServer {
-  url: string;
-  archives(): number;
-  stop(): void;
-}
-interface Harness {
-  REPO: string;
-  STARTER: string;
-  buildEnv(sb: Sandbox): Record<string, string>;
-  expectExit(r: { code: number | null; err: string }, want: number): void;
-  killTree(proc: { pid: number; kill: () => void; exitCode: number | null; signalCode: unknown }): void;
-  realRoutes(): Promise<Record<string, Uint8Array>>;
-  run(
-    cmd: string[],
-    o: { env: Record<string, string>; cwd?: string; stdin?: Uint8Array | string; timeoutMs?: number },
-  ): Promise<RunResult>;
-  startServer(routes: Record<string, Uint8Array>): FixtureServer;
-  starter(sb: Sandbox, args: string[]): Promise<RunResult>;
-  starterCmd(root: string, args: string[]): string[];
-}
-const HARNESS = join(import.meta.dir, "..", "..", "bootstrap", "test", "lib", "harness.ts");
-const H = (GATE_ON() ? await import(pathToFileURL(HARNESS).href) : undefined) as Harness | undefined;
-function GATE_ON(): boolean {
-  return process.env.GETTY_BUN_TEST_GATE === "1";
-}
+import { GATE, H, OFFLINE_MIRROR, hostileEnv, makeHostile, markersLeft, type Harness, type Hostile, type Sandbox, type FixtureServer } from "./support.js";
 // undefined members while the gate is skipped; nothing below runs then
 const { REPO, buildEnv, expectExit, killTree, realRoutes, run, startServer, starter, starterCmd } = (H ?? {}) as Harness;
 
-
-const GATE = GATE_ON();
 const FIXTURES = join(import.meta.dir, "..", "fixtures", "codex");
-const OFFLINE_MIRROR = "http://127.0.0.1:9"; // the discard port: nothing answers
 const BOUND_MS = 30_000;
 const BUNDLE = "bundle/entry.js"; // relative to the consumer root, always with /
 // What the hooks run: a plain wrapper around the bundle (see beforeAll).
@@ -94,39 +46,6 @@ const LARGE_OUTPUT = `${JSON.stringify({
 const bytes = async (path: string) => await Bun.file(join(FIXTURES, path)).bytes();
 const text = (b: Uint8Array) => new TextDecoder().decode(b);
 
-// A "project" that attacks the Bun started in it. Markers go to files outside the project,
-// so the cwd stays the only thing the attack lives in.
-interface Hostile {
-  cwd: string;
-  bunfigMarker: string;
-  optionsMarker: string;
-  bunOptions: string;
-}
-async function makeHostile(base: string): Promise<Hostile> {
-  const cwd = join(base, "project");
-  const markers = join(base, "markers");
-  await mkdir(cwd, { recursive: true });
-  await mkdir(markers, { recursive: true });
-  const bunfigMarker = join(markers, "bunfig-preload");
-  const optionsMarker = join(markers, "options-preload");
-  const optionsPreload = join(base, "options-preload.ts");
-  const leave = (marker: string) =>
-    `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(marker)}, "ran");\n`;
-  await writeFile(join(cwd, "pre.ts"), leave(bunfigMarker));
-  await writeFile(optionsPreload, leave(optionsMarker));
-  await writeFile(
-    join(cwd, "bunfig.toml"),
-    `preload = ["./pre.ts"]\n\n[define]\n"process.env.ABR_GATE_DEFINE" = "\\"-DEFINED\\""\n`,
-  );
-  await writeFile(join(cwd, ".env.local"), "ABR_GATE_ENVFILE=-ENVFILE\n");
-  return { cwd, bunfigMarker, optionsMarker, bunOptions: `--preload=${optionsPreload.replaceAll("\\", "/")}` };
-}
-// bun test sets NODE_ENV=test, and Bun skips .env.local under it; a host does not set it.
-function hostileEnv(env: Record<string, string>, h: Hostile): Record<string, string> {
-  const { NODE_ENV: _drop, ...rest } = env;
-  return { ...rest, BUN_OPTIONS: h.bunOptions };
-}
-const markersLeft = (h: Hostile) => [h.bunfigMarker, h.optionsMarker].filter((m) => existsSync(m));
 
 describe.skipIf(!GATE)(`phase 2 gate [${H?.STARTER ?? "skipped"}]`, () => {
   let tmp = "";
@@ -323,7 +242,7 @@ else process.exit(code);
       ["malformed/truncated.json", "HOOK_INPUT_INVALID"],
       ["malformed/empty.json", "HOOK_INPUT_INVALID"],
       ["malformed/not-an-object.json", "HOOK_INPUT_INVALID"],
-      ["malformed/session-end.json", "HOOK_EVENT_UNSUPPORTED"],
+      ["malformed/session-end.json", "HOOK_EFFECT_UNSUPPORTED"],
     ] as const) {
       test(`${file}: ${code}`, async () => {
         const r = await runHook("context", await bytes(file));
