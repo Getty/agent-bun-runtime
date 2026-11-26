@@ -1,0 +1,35 @@
+---
+claimed_at: 2026-11-26T21:14:30Z
+claimed_by: getty-bun-codex-worker
+class: standard
+completed: 2026-11-26T21:14:30Z
+created: 2026-11-26T20:05:57Z
+id: 30
+priority: high
+started: 2026-11-26T20:32:27Z
+status: done
+tags:
+- sdk
+- codex
+- phase-2b
+title: 'Phase 2b: Codex codec, the consumers'' remaining events'
+updated: 2026-11-26T21:14:30Z
+---
+
+Brief point 2. Add the Codex events loadguard (hooks/hooks.json via .codex-plugin), agent-irc (hooks/codex.json) and skilletor (hooks/codex-hooks.json) use that phase 2 lacks; source-checked against openai/codex at a fixed commit.
+
+Started on top of the uncommitted k31 core. Source-checked at openai/codex 3f65e9f: PreToolUse deny needs a non-empty permissionDecisionReason after Rust str::trim (output_parser.rs:461-471, :514-521), allow without updatedInput and ask are rejected by Codex (:452-460), updatedInput only with permissionDecision allow (:444-451); Bash and apply_patch rewrites read only the string field command (core/src/tools/handlers/mod.rs:112-121, unified_exec/exec_command.rs:370-388, apply_patch.rs:377-382).
+
+Done (uncommitted, on top of k31): src/codex.ts adds UserPromptSubmit (add-context at prompt-input), PreToolUse (tool-permission deny -> permissionDecision deny + permissionDecisionReason; allow/ask unsupported; tool-input -> permissionDecision allow + updatedInput, Bash/apply_patch exactly {command: string}; no add-context placement) and PostToolUse (add-context at tool-result). hostTurnId from turn_id on all but SessionStart; tool {name,input} on Pre/PostToolUse when tool_name and tool_input are both present. Deny reason blank check uses Unicode White_Space (Rust str::trim), not JS trim. Lone-surrogate check on context text, reason and every key/string of updatedInput. Source-checked at openai/codex 3f65e9f, citations in the doc comments. README 'The Codex codec' updated; the Exit codes label replaced for the Codex half (pre_tool_use.rs:268-284, user_prompt_submit.rs:229-245). Fixtures: input/user-prompt-submit.json, pre-tool-use.bash.json, pre-tool-use.apply-patch.json, post-tool-use.bash.json; malformed/pre-tool-use.tool-name-number.json; output/user-prompt-submit.add-context.out, post-tool-use.add-context.out, pre-tool-use.deny.out, pre-tool-use.bash.tool-input.out plus encoder inputs pre-tool-use.deny-reason.json, pre-tool-use.bash.updated-input.json. Inputs and outputs schema-checked (Python jsonschema 4.19.2, Draft 7); .out bytes equal a hand-built json.dumps. Checks: typecheck clean; bun test ./test/ 226 pass, 20 skip (19 gate without GETTY_BUN_TEST_GATE, 1 Windows-only), 0 fail; gate with sh 17 pass. For sdk-test-writer: no tests for the new events yet; entry.ts only knows two placements; test/entry.test.ts label 'event the codec has no rules for' on PreToolUse is now stale (assertion still holds). For sdk-worker: context.ts doc says tool is PreToolUse-only, Codex also fills it on PostToolUse.
+
+sdk-test-writer: new test/codex-events.test.ts (122 tests): decode UserPromptSubmit/PreToolUse/PostToolUse incl. malformed tool_name, encode every new .out byte for byte (notify+context both list orders), deny reason White_Space (U+0085 rejected, U+FEFF/U+200B delivered), allow/ask unsupported, Bash/apply_patch exactly {command}, tool-input without tool, lone surrogates in reason/systemMessage/updatedInput keys+values, permission+input unsupported, main() paths; codex.test.ts generic-event list updated, codex-process.test.ts gets the malformed tool-name row. Codec tests, not a Codex host. Red on scratch src: JS \s instead of White_Space, key order swap, Bash shape unchecked, surrogate keys unchecked, permission+input allowed, hostTurnId on SessionStart, apply_patch dropped: each red.
+
+2026-11-26 21:04 Review (getty-bun-reviewer, uncommitted 2b tree on phase-2b-claude-code): local checks green with harness Bun 1.4.5: install --frozen-lockfile (bun.lock unchanged), typecheck, bun test ./test/ 646 pass/49 skip (gate files + Windows-only), gate sh 40/40 (no skip), bootstrap sh 116 pass/20 skip (Windows/real download), render-template --check and --nunjucks, render-pin --check, dash -n, pack --dry-run (dist + README + LICENSE + package.json). No CI run on this diff yet; Windows legs pending. Verdict k30: GO. Note (medium, shared with k36, decide before tag): decoders reject type drift in keys no consumer reads; see k36 note.
+
+2026-11-26 21:06 Review finding (decode only lifted keys, ADR 0009) done in the Codex codec, uncommitted. src/codex.ts: EVENTS keys tables replaced by 'lifts'; decode type-checks only session_id, cwd (all five events), turn_id (all but SessionStart), tool_name (Pre/PostToolUse), strings when present; tool_input any JSON; transcript_path, model, permission_mode, source, prompt, agent_*, tool_use_id, tool_response stay unchecked in native.input. Doc comment and README 'The Codex codec' record the relaxation (phase 2: wrong-typed transcript_path etc. on SessionStart/SubagentStart was HOOK_INPUT_INVALID, now decodes). Fixtures: malformed/session-start.transcript-path-number.json moved to new tolerated/; new synthetic tolerated/pre-tool-use.tool-use-id-number.json; fixtures README updated (new tolerated/ section). Typecheck green. bun test ./test/: codex.test.ts 11 red, codex-events.test.ts 14 red, codex-process.test.ts 1 red, all asserting HOOK_INPUT_INVALID for now-unchecked keys or the moved fixture path; for the sdk-test-writer. claude-code.test.ts 62 red belong to the parallel Claude Code change.
+
+Test follow-up for ADR 0009 (decoders check only what they lift), tests only: test/codex.test.ts, codex-events.test.ts, codex-process.test.ts. Wrong-type tables split into lifted keys (session_id, cwd, turn_id, tool_name; wrong type and null are HOOK_INPUT_INVALID, null checked against src/codex.ts: invalid) and unchecked keys (any value accepted, kept unchanged in native.input, envelope unchanged); tolerated/ fixtures decode; transcript-path-number removed from the malformed lists. Each changed assertion shown red on a scratch copy of src (checks transcript_path / accepts null / drops turn_id). typecheck clean, bun test ./test/ 606 pass 0 fail 49 skip (gate-off suites), gate with sh 40 pass 0 fail. Mocked-codec tests prove the codec, not Codex.
+
+Re-review (getty-bun-reviewer, uncommitted 2b tree): harness Bun 1.4.5: install --frozen-lockfile, typecheck, bun test ./test/ 606 pass/49 skip/0 fail (fewer tests: the dropped unread-key type tables), gate sh 40/40 no skip, bootstrap CI=1 sh 116 pass/20 skip (Windows, real download), render-template --check and --nunjucks, render-pin --check, dash -n, pack --dry-run (getty-agent-bun-runtime-0.1.0.tgz, dist+README+LICENSE+package.json); dist/ removed. CI on this diff not run yet. Verdict k30: GO for commit. Codex decoder checks only session_id, cwd, turn_id (not SessionStart), tool_name (tool events); tolerated/ fixtures decode with the value kept; ADR 0009 bullet matches.
+
+Committed in 6ff253b
