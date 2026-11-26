@@ -159,7 +159,7 @@ describe("readJsonObject", () => {
 
   for (const bad of [0, -1, 1.5, Number.NaN]) {
     test(`maxBytes ${bad} is rejected as a programming error`, async () => {
-      expect(readJsonObject(source(["{}"]).stream, { maxBytes: bad })).rejects.toThrow(RangeError);
+      await expect(readJsonObject(source(["{}"]).stream, { maxBytes: bad })).rejects.toThrow(RangeError);
     });
   }
 });
