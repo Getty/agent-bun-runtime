@@ -433,8 +433,9 @@ starter removes these variables before it forwards to PowerShell; `getty-bun.ps1
 them from its own process environment once, at the start, and never edits the child's
 environment block (.NET rebuilds that block and throws on names that differ only in case,
 such as `Path` and `PATH`). The scenarios in `bootstrap/test/hostile-cwd.test.ts` and the
-gate check all of this on every CI leg; the Windows legs had not run when this was
-written. (Bun 1.4.5 linux-x64:
+gate check all of this on every CI leg, Windows PowerShell 5.1 and pwsh included (all
+16 jobs green in CI run 45905322296; the run before it failed on pwsh, which shows the
+k40 checks ran there). (Bun 1.4.5 linux-x64:
 executed; without these, a project `preload`, a `[define]`, `.env`, `.env.local` and a
 `BUN_OPTIONS` preload all reached the entry; with them none did. k40, same platform: the
 suite removes all seven other variables and checks that none reaches the entry. Its
