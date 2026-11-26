@@ -1,0 +1,13 @@
+---
+class: standard
+created: 2026-11-26T21:23:34Z
+id: 38
+priority: low
+status: backlog
+tags:
+- ci
+title: 'CI: pin nunjucks'' own dependencies in the template check'
+updated: 2026-11-26T21:23:34Z
+---
+
+Phase 2b review nit: .github/actions/nunjucks installs nunjucks 3.2.4 exactly, but its dependencies float (no lockfile). Commit a small lockfile for the scratch install or verify the tree, so the template render in CI is reproducible.
