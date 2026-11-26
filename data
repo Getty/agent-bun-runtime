@@ -1,0 +1,51 @@
+---
+class: standard
+completed: 2026-11-26T19:46:50Z
+created: 2026-11-25T17:29:14Z
+depends_on:
+- 21
+id: 22
+priority: high
+started: 2026-11-26T19:46:50Z
+status: done
+tags:
+- phase-2
+- sdk
+- codex
+title: 'Phase 2: Codex codec for SessionStart and SubagentStart'
+updated: 2026-11-26T19:46:50Z
+---
+
+Part of k3. Lane: getty-bun-codex-worker. Needs the core interface of k21.
+
+Codex codec of @getty/agent-bun-runtime (export ./codex): decode and encode SessionStart and SubagentStart; everything else is out.
+- Format source-checked in openai/codex at 3f65e9f13165d85d1b1fbe20ce06c55758f927b9 (the commit hub agent-developer pinned in docs/windows-referenzen.md), every field and output key labelled with file:line. Shallow clone into .dev/research/ (gitignored); untrusted, never built or run.
+- Decode: hook input fields per event, required versus optional, missing stays missing; other events or malformed input are a typed input error.
+- Encode: no-decision is empty output and exit 0. add-context with placement subagent-input on SubagentStart, and the placement that fits SessionStart, in the output form Codex parses (source-checked). Any other event, effect or placement is an explicit unsupported-effect error.
+- Fixtures under test/fixtures/codex/, each labelled source-checked (commit, file:line); no real Codex in phase 2 (that is 3a).
+- What 3a must measure goes into the report: stdin closing, exit codes other than 0 and 2, additionalContext limits, the output shape Codex accepts.
+Briefing (f7968f1, hook-contract.md) also writes a top-level systemMessage on both events: outside the MVP effects, own card, no code here.
+
+Started: source check of the Codex format and fixtures first; the codec follows once k21's core interface stands.
+
+2026-11-25 17:48 Part 1 done (source check + fixtures, no code): openai/codex 3f65e9f read in .dev/research/codex (untrusted, not built or run). Fixtures in test/fixtures/codex/ (input, partial, malformed, output + README with file:line labels; inputs schema-checked against Codex's generated schemas). Key findings: start hooks fail alike on every non-zero exit (2 not special), stdout dropped, stderr never shown; unknown output keys fail the hook (deny_unknown_fields); stdin is closed after write_all on the local path (traced). Codec shape proposed to the lead; waiting for k21's interface for part 2.
+
+2026-11-25 19:10 Part 2 done: Codex codec in src/codex.ts (one export, codex: HookCodec), tests in test/codex.test.ts (100), e2e entry test/fixtures/codex/entry.ts, fixture README updated. Decode: hook_event_name must be a string (else HOOK_INPUT_INVALID), SessionStart or SubagentStart (else HOOK_EVENT_UNSUPPORTED); other keys optional, type-checked when present (transcript_path string or null), enums unchecked, unknown keys kept. session_id -> hostSessionId, cwd -> hostWorkingDirectory, SubagentStart turn_id -> hostTurnId; no hostParentSessionId (session_id is the root-shared identity, parent differs once agents.max_depth > 1). Encode: no-decision empty; add-context at the event's placement as hookSpecificOutput JSON + LF; other placement, unpaired surrogate, other kind or event: HOOK_EFFECT_UNSUPPORTED (encode). Checks: typecheck exit 0; bun test ./test/ 210 pass, 1 skip (Windows-only output test), 0 fail; entry piped with every input/partial fixture gives the .out bytes. package.json ./codex export and README text proposed to the lead for the sdk-worker. No commit.
+
+Ready for review: src/codex.ts, test/codex.test.ts, test/fixtures/codex/ (uncommitted, branch phase-2-sdk). Reviewer: run bun run typecheck and bun test ./test/ with the harness Bun. Open for the sdk-worker: the ./codex entry in package.json exports and the README lines (text in the lead's report). Real Codex checks stay for 3a.
+
+2026-11-26 02:25 windows review (static): no Windows finding in src/codex.ts (pure, no paths, no I/O). The fixture session-start.startup.windows.json is correctly labelled derived. Exit 0/1 pass the starter unchanged. Codex commandWindows runs the line under -Command, which maps codes other than 0/1 to 1 (documented, about_pwsh; not checked). That matters only for a later exit-2 effect. For 3a on a real Windows host: the bytes bun.exe receives under the session shell (BOM, non-ASCII cwd/transcript_path, CRLF) and whether end of input arrives.
+
+2026-11-26 02:26 review (getty-bun-reviewer): ready. Spot-checked about 25 file:line labels in src/codex.ts, test/fixtures/codex/README.md, README.md and docs/plan.md against openai/codex 3f65e9f (schema.rs, session_start.rs, output_parser.rs, dispatcher.rs, command_runner.rs, hook_runtime.rs, session.rs, session/mod.rs, config/mod.rs, protocol.rs, common.rs, output_spill.rs, loader.rs, hook_environment_executor.rs, subagent_notifications.rs, tui/cli Cargo.toml, models.json): all match. The codec's keys equal the properties of the generated input schemas; the output schemas have additionalProperties false. The lone-surrogate claim checks out in serde_json 1.0.150 read.rs (Codex locks 1.0.149, as labelled). Low: the README's Codex section cites only session_start.rs:316-330 for the onFailure: block part as well; that evidence is common.rs:74-90, hooks/src/engine/mod.rs:216-226 and session_start.rs:345-346 (the plan cites common.rs correctly).
+
+2026-11-26 19:24 review (fix round 1, getty-bun-reviewer): GO for the first commit and the CI push. Onfailure citations, hostSessionId wording and codec.ts comment are fixed, and hostParentSessionId is dropped. Nit: src/codex.ts:80 'No hostParentSessionId' reads as a field that exists; reword as 'the handoff's hostParentSessionId is not in the MVP envelope because ...'. The BOM rule is labelled not checked, ok.
+
+Committed in 1791043, pushed for CI; fix round 2 and CI pending
+
+2026-11-26 Comment fix (no code change), uncommitted on top of 1791043: src/codex.ts doc comment now says the handoff's hostParentSessionId is not in the MVP envelope and Codex gives nothing to fill it (session_id is the root-shared identity, the parent thread id is not in the hook input). Checks: typecheck exit 0; bun test ./test/codex.test.ts 100 pass, 0 fail.
+
+2026-11-26 19:33 review (fix round 2, getty-bun-reviewer): GO. src/codex.ts:80-82 rewording resolves the nit. README BOM label is now split: the PowerShell BOM is not checked, the starter's reset is source-checked; ps1:639-644 verified.
+
+Round 2 committed in 3523337, second CI run pending
+
+Merged to main by fast-forward at 0bc8218 (PR 2), CI 45885263188 green; commits 1791043, 3523337.
