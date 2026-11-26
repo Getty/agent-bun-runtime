@@ -1,0 +1,19 @@
+---
+class: standard
+completed: 2026-11-26T23:35:27Z
+created: 2026-11-26T23:29:16Z
+id: 45
+priority: high
+started: 2026-11-26T23:33:30Z
+status: done
+tags:
+- release
+title: 'Stamp 0.1.0: Changes, README, plan status per release step 1'
+updated: 2026-11-26T23:35:27Z
+---
+
+Release step 1 of docs/release-0.1.0.md after the doc fix: pre-0.1.0 merge = b577af7, PR 4, runs 45907098883 (PR) and 45908923306 (push). Changes header in house format, commit time UTC. Nothing else changes. Release manager.
+
+2026-11-26 23:33 Stamp edits made, uncommitted, awaiting review (Changes, README.md, docs/plan.md); package.json already 0.1.0.
+
+2026-11-26 23:35 Committed b808c29 (stamp 0.1.0), not pushed.
