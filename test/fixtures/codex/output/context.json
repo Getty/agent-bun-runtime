@@ -1,0 +1,1 @@
+"<skill name=\"getty-bun-core\" dir=\"/home/dev/.agents/skills/getty-bun-core\">\n# getty-bun core\n\nStreams: stdout belongs to the host protocol (\"hook JSON\"); diagnostics go to stderr.\nA Windows path stays as it is: C:\\Users\\dev\\AppData\\Local\\getty\nTab\there, umlauts Grüße, an arrow → and an emoji 🚀 survive unchanged.\n</skill>"
