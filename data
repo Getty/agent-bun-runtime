@@ -1,0 +1,23 @@
+---
+class: standard
+completed: 2026-11-26T23:32:55Z
+created: 2026-11-26T23:29:13Z
+id: 44
+priority: high
+started: 2026-11-26T23:29:25Z
+status: done
+tags:
+- docs
+- release
+title: 'docs/release-0.1.0.md: merge, tag and stamp rules before the release (hub
+  F1-F3)'
+updated: 2026-11-26T23:33:18Z
+---
+
+Hub review before the tag (READY_WITH_NITS). F1: release step 2 merges the stamp PR fast-forward, waits for green push CI on main, tags exactly that commit, names that run; the GitHub release names commit and run. F2: stamp header in house format (printf %-9s), one rule for status lines: name both runs, PR and push. F3: trusted publishing order (workflow, npm config with that filename, 0.1.1 within 2 days, then disallow tokens), npm >= 11.5.1, Node >= 22.14.0, allowed action. Small: --check --nunjucks, fresh clone/worktree of the tag, which Bun (1.4.5; harness Bun without Bun). Owner: main session (docs/), commit by release manager.
+
+Doc fix done; getty-bun-reviewer GO (after finding 1 and nits 2-3 applied), getty-bun-windows-reviewer GO (Windows not touched). Ready for commit.
+
+2026-11-26 23:32 Committed 4f2968b on release-0.1.0
+
+2026-11-26 23:33 Hash amended: fd06c57 (was 4f2968b; subject shortened, tree identical)
