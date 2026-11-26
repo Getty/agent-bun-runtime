@@ -5,7 +5,6 @@ model: sonnet
 skills:
   - getty-bun-core
   - getty-git-commit-style
-  - getty-git-usage
   - kanban-issues-karr-ticket
 ---
 
