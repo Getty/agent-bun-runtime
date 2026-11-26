@@ -93,8 +93,13 @@ process.exit(await main({ codec, handler }));
 main(...)` also ends the process while the host keeps stdin open, but only when nothing
 else keeps Bun running: a timer or socket the handler left open would hold the hook until
 the host's timeout. `process.exit` ends it as soon as `main()` has returned, and by then
-`main()` has written everything. Executed for both forms with stdin held open
-(`test/entry.test.ts`, Bun 1.4.5, linux-x64-baseline); Windows not checked yet.
+`main()` has written everything. Executed for both forms with stdin held open by a test
+through `Bun.spawn`, not by a real host: on Linux (`test/entry.test.ts`, Bun 1.4.5,
+linux-x64-baseline), and on Windows in CI run
+[45883791115](https://github.com/Getty/agent-bun-runtime/actions/runs/45883791115)
+(`windows-latest`, image windows-2025-vs2026, Bun 1.4.5), directly in `sdk checks
+(windows)` and through both Windows starters in `gate (windows powershell)` and `gate
+(windows pwsh)`.
 
 ### The Codex codec
 
@@ -160,8 +165,9 @@ entry's exit code reaches the host unchanged.
 - One leading UTF-8 byte order mark (`EF BB BF`) is skipped, then whitespace; anything
   else before `{`, a second byte order mark or one after whitespace included, is an
   error. RFC 8259 section 8.1 lets a parser ignore the mark, and Windows PowerShell 5.1
-  can write one into a child's redirected stdin under code page 65001 (not checked; the
-  Windows starter avoids it by resetting that encoding, `bootstrap/getty-bun.ps1:639-644`).
+  can write one into a child's redirected stdin under code page 65001 (not checked). The
+  Windows starter avoids it by resetting that encoding (source-checked, read but not run:
+  `bootstrap/getty-bun.ps1:639-644`).
   A scan that tracks strings and escapes finds the end of the object; `JSON.parse` then
   validates it.
 - After the object it stops reading and cancels the stream: bytes that arrived in the

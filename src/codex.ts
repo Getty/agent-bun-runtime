@@ -77,8 +77,9 @@ function stringField(input: Readonly<Record<string, unknown>>, key: string): str
  *   `HOOK_INPUT_INVALID`. Enum strings (`source`, `permission_mode`) are not checked
  *   against a list. Unknown keys stay in `native.input`, unchecked.
  * - `session_id` becomes `hostSessionId`, `cwd` becomes `hostWorkingDirectory`, and for
- *   `SubagentStart` `turn_id` becomes `hostTurnId`. No `hostParentSessionId`: Codex's
- *   `session_id` is the identity shared by the root thread and all its descendants
+ *   `SubagentStart` `turn_id` becomes `hostTurnId`. The handoff's `hostParentSessionId`
+ *   is not in the MVP envelope, and Codex gives nothing to fill it: `session_id` is the
+ *   identity shared by the root thread and all its descendants
  *   (codex-rs/core/src/session/session.rs:677-680), not the parent thread, which differs
  *   once `agents.max_depth` exceeds its default 1 (codex-rs/core/src/config/mod.rs:294,
  *   :4330-4334); the parent's thread id (`parent_thread_id`,

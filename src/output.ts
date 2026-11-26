@@ -3,9 +3,11 @@ export type OutputWriter = (bytes: Uint8Array) => unknown;
 
 /**
  * The real stdout. Bun.write resolves once all bytes are written, also on a slow pipe
- * (executed on Linux, Bun 1.4.5: 1 KB, 200 KB and 4 MB to a reader that starts 1.5 s
- * late; Windows not checked yet: the 256 KiB late-reader test in `test/entry.test.ts` is
- * to run on the Windows CI legs).
+ * (executed on Linux, Bun 1.4.5, shell pipeline `entry | (sleep 1.5; wc -c)`: with 300000
+ * and 4000000 characters of add-context, main() returned after about 1.5 s, waiting for
+ * the reader, exit 0, all bytes arrived. Windows: not checked; CI has no late reader
+ * there, and a test that runs the entry through Bun.spawn is not one, since Bun.spawn
+ * drains a child's stdout eagerly).
  */
 export async function writeStdout(bytes: Uint8Array): Promise<void> {
   await Bun.write(Bun.stdout, bytes);
