@@ -1,0 +1,41 @@
+---
+class: standard
+completed: 2026-11-26T19:47:28Z
+created: 2026-11-25T17:29:52Z
+depends_on:
+- 21
+- 24
+id: 25
+priority: high
+started: 2026-11-26T19:47:28Z
+status: done
+tags:
+- phase-2
+- ci
+title: 'Phase 2: CI, SDK checks and the gate job per leg'
+updated: 2026-11-26T19:47:28Z
+---
+
+Part of k3. Lane: getty-bun-ci-worker (.github/). Needs k21 for the SDK checks and k24 for the gate.
+
+- SDK checks: bun install --frozen-lockfile, typecheck, bun test test/ (the SDK suite; bootstrap/test keeps its own jobs), on Linux x64 and both Windows shells so the empty-output test of k11 runs on Windows.
+- Gate job, one leg each: ubuntu-latest sh, ubuntu-24.04-arm sh, windows-latest with shell powershell (5.1) and with shell pwsh (7); it runs the k24 gate command.
+- Every action pinned by commit SHA; the harness Bun from the pinned setup step, never from the starter under test. No publish step, no npm registry call.
+
+Command contract: SDK checks run bun install --frozen-lockfile, bun run typecheck, bun test ./test/ (with ./). Gate: GETTY_BUN_TEST_GATE=1 bun test ./test/gate/ with GETTY_BUN_TEST_STARTER per leg and .dev/fixtures fetched and cached as in the scenarios job.
+
+2026-11-25 17:59 CI worker, uncommitted: .github/workflows/ci.yml gains jobs 'sdk' (linux bash, windows powershell, windows pwsh; install, typecheck on Linux only, bun test ./test/) and 'gate' (sh x64, sh arm64, powershell, pwsh; fixtures cache+fetch, frozen install, GETTY_BUN_TEST_GATE=1 bun test ./test/gate/ with junit report), plus .github/scripts/assert-tests-ran.ts which fails on 0 tests, any skipped test, any failure or a missing report (verified on synthetic reports). Phase 1 jobs untouched. YAML parsed with harness Bun. Not run in CI; waiting for the gate file (k24) and a CI run. bun.lock holds all 20 @typescript/typescript-* optional platform packages incl. win32-x64, win32-arm64, linux-x64, linux-arm64.
+
+2026-11-26 02:27 windows review (static): go for the first CI run. Actions are pinned by SHA (the same as phase 1). (L) In the sdk job (:205-207, :216-217, :234-236) the second Windows shell adds no coverage: every child in test/ gets its stdio from Bun.spawn, not from the step's shell, so the comment's rationale does not hold. Under shell: powershell (5.1) the Actions wrapper sets ErrorActionPreference stop; how 5.1 treats bun test's stderr there is not checked. Suggest bash for that step; starter-shell coverage is the gate job's. (L) The sdk job does not assert that the Windows-only k11 control ran (expected 15 skip on Windows vs 16 on Linux); the gate job does, through assert-tests-ran. That script's regex matches a real Bun 1.4.5 junit root (tests/skipped/failures present; checked locally on the skipped gate, report to stdout). The relative report path .dev/gate-junit.xml is fine on Windows (.dev exists after the fixture fetch).
+
+Fix round 1: sdk job Windows test step under bash (one Windows leg), assert the Windows-only k11 control ran there.
+
+2026-11-26 02:30 Fix round 1: sdk job is now linux + windows-latest, all steps bash; JUnit written to .dev/sdk-junit.xml and checked with assert-tests-ran.ts --allow-skips (Windows adds --require-ran 'fails with EINVAL on Windows'). Script keeps strict default. Local only; CI not run.
+
+windows review, fix round 1: L1 fixed (one Windows sdk leg, every step bash; the comment's reason is now right). L2 fixed: with the control skipped, assert-tests-ran --allow-skips --require-ran 'fails with EINVAL on Windows' exits 1 with 'was skipped' (executed on Linux against a real Bun 1.4.5 JUnit report). Approval needs sdk checks (windows) green with 'required testcase ran: fails with EINVAL on Windows', and both Windows gate legs at tests=13 skipped=0 failures=0.
+
+Committed in a40ab45, pushed for CI; fix round 2 and CI pending
+
+windows review, CI 45883791115 (commit 40d14da, image windows-2025-vs2026), read from the job logs: sdk checks (windows): setup-bun 'Using a cached version of Bun: 1.4.5+a7733435c', 'bun install v1.4.5', '6 packages installed' under --frozen-lockfile, '228 pass / 16 skip / 0 fail, Ran 244 tests', 'tests=244 skipped=16 failures=0', 'required testcase ran: fails with EINVAL on Windows'. gate (windows powershell) and gate (windows pwsh): 'Ran 13 tests', 'tests=13 skipped=0 failures=0' each. No warning, error or killTree line in the three logs. Verdict: approve for merge after the second run (round 2 committed) shows the same on these three jobs, Linux gate at 14/0/0, and every job of that run green, the phase 1 Windows jobs included (scenarios and real download (windows powershell) were still running in 45883791115).
+
+Merged to main by fast-forward at 0bc8218 (PR 2), CI 45885263188 green; commits a40ab45.
