@@ -3,7 +3,8 @@
 Status: accepted, 2026-11-25 (owner; requested through hub `perl-developer`, confirmed in
 hub `agent-developer`); supersedes the repository name in
 [0001](0001-layout-and-delivery.md) and the package name in
-[0006](0006-npm-distribution.md).
+[0006](0006-npm-distribution.md); the git-commit pin before the first release superseded by
+[0009](0009-first-release-claude-code-and-consumer-skills.md).
 
 ## Context
 

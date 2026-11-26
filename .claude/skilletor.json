@@ -8,6 +8,11 @@
     },
     "karr": {
       "git": "https://github.com/Getty/karr"
+    },
+    "agent-bun-runtime": {
+      "git": "https://github.com/Getty/agent-bun-runtime",
+      "ref": "v0.1.0",
+      "path": "skills"
     }
   },
   "install": {
@@ -15,7 +20,7 @@
       "getty-house@getty"
     ],
     "skills": [
-      "getty-bun-integration@getty",
+      "getty-bun-integration@agent-bun-runtime",
       "codex-plugin-engineering@getty",
       "claude-code-plugin-engineering@getty",
       "hermes-plugin-engineering@getty",

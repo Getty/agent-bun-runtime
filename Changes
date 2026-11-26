@@ -20,8 +20,29 @@ Revision history for agent-bun-runtime
     getty-bun stays the name of the starters, the GETTY_BUN_* variables
     and the store under ~/.getty/runtimes/bun.
   - SDK @getty/agent-bun-runtime (not published yet): main() reads one
-    hook object from stdin, runs the handler and writes the effect to
-    stdout; failures exit 1 with one stderr line and a typed error code.
-    The package root has the core, ./codex the Codex codec for the
-    SessionStart and SubagentStart hooks with no-decision and add-context
-    effects.
+    hook object from stdin, runs the handler and writes its effects to
+    stdout. A handler returns one effect or a list, at most one of each
+    kind: no-decision, add-context (placements session-start-input,
+    subagent-input, prompt-input, tool-result), tool-permission,
+    tool-input and notify-user. The invocation carries envelopeVersion
+    and, for tool events, the tool.
+  - Codecs are opaque: a plugin passes ./codex or ./claude-code to main()
+    and names the host explicitly, never guessed from the environment.
+    An event a codec has no rules for is decoded generically and only
+    no-decision encodes for it. Decoders check only the keys they lift
+    into the invocation, so a host release that changes another key does
+    not fail every hook.
+  - Codex codec ./codex for SessionStart, SubagentStart, UserPromptSubmit,
+    PreToolUse and PostToolUse.
+  - Claude Code codec ./claude-code for SessionStart, UserPromptSubmit,
+    PreToolUse, PostToolUse and CwdChanged.
+  - main() takes onFailure: "open" (default) exits 1 on failure and "closed"
+    exits 2, which both hosts read as a block on PreToolUse and
+    UserPromptSubmit. One stderr line with a typed error code either way.
+  - Starters run Bun without the project's bunfig.toml, .env files and
+    BUN_OPTIONS, so a hook started in a hostile project directory runs
+    the same code as anywhere else.
+  - Consumer skills in skills/: getty-bun, getty-bun-integration and the
+    skilletor template getty-bun-install, which renders the pinned
+    starters for a plugin from vars.bun_version. Consumers take the SDK
+    from npm, not from a git commit.

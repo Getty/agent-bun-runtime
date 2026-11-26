@@ -2,8 +2,10 @@
 
 Status: adapted from the handoff on 2026-11-25. Phase 1 (the bootstrap starters in
 `bootstrap/`) is complete: merged into `main` at `262bc95` (PR 1), gate green in CI run
-45603412444. Phase 2 (the SDK core and the Codex codec) is being built on branch
-`phase-2-sdk`; phase 3 onward is not implemented yet.
+45603412444. Phase 2 (the SDK core and the Codex codec) is complete: merged into `main`
+at `0bc8218` (PR 2), gate green in CI run 45885263188. Phase 2b (the Claude Code codec,
+the consumer skills and release 0.1.0, [ADR 0009](adr/0009-first-release-claude-code-and-consumer-skills.md))
+is being built on branch `phase-2b-claude-code`; phase 3 onward is not implemented yet.
 Source: [handoff/2026-11-25-bun-runtime-handoff.md](handoff/2026-11-25-bun-runtime-handoff.md).
 Where this plan and the handoff disagree, this plan wins; the deviations are listed below
 and recorded as ADRs in [adr/](adr/).
@@ -22,18 +24,22 @@ host hook / bin entry
 
 No Python, Perl or Node in a plugin. One concept for all hooks and binaries.
 
-**Small first, then grow.** The first release carries only what the first consumer
-(briefing on Codex) needs, on Linux and Windows. Everything else waits until a consumer
-asks for it.
+**Small first, then grow.** The first release, 0.1.0, carries only what the consumers
+asking for it use today (loadguard, skilletor and briefing; Codex and Claude Code), on
+Linux and Windows ([ADR 0009](adr/0009-first-release-claude-code-and-consumer-skills.md)).
+Everything else waits until a consumer asks for it.
 
 ## Parts
 
 | Part | Where it lives | What it is |
 |---|---|---|
-| Bootstrap | `bootstrap/` here; delivered as the skilletor template `getty-bun-install` in Getty/skills | The two starters, the version table and the pin render |
-| `@getty/agent-bun-runtime` | repo root (this package) | The handoff's SDK, cut to the MVP: context, Codex codec, effects, `main()` |
-| Consumer 1: briefing | `~/dev/briefing` | Codex only: preloads declared skills into a subagent at `SubagentStart` |
-| Consumer 2: skilletor | `~/dev/skilletor` | Already ~10k lines of TypeScript under Node; moves to getty-bun |
+| Bootstrap | `bootstrap/` here; delivered as the skilletor template `getty-bun-install` in `skills/` here | The two starters, the version table and the pin render |
+| `@getty/agent-bun-runtime` | repo root (this package), on npm from 0.1.0 | The handoff's SDK, cut to the MVP: context, the Codex and Claude Code codecs, effects, `main()` |
+| Consumer skills | `skills/` here, installed with skilletor pinned to the release tag | `getty-bun` (use), `getty-bun-integration` (engineering, the contract), `getty-bun-install` (the template) |
+| Consumer: skilletor | `~/dev/skilletor` | Claude Code and Codex hooks; ~10k lines of TypeScript under Node; moves first after 0.1.0 |
+| Consumer: loadguard | `~/dev/loadguard` | Claude Code and Codex guard: context on `SessionStart` and `UserPromptSubmit`, `deny` on `PreToolUse` |
+| Consumer: agent-irc | `~/dev/agent-irc` | Observes 13 events through `mcp_tool` hooks into its own MCP server; no command hook, so no codec on its path |
+| Consumer: briefing | `~/dev/briefing` | Codex only: preloads declared skills into a subagent at `SubagentStart` |
 
 ## Deviations from the handoff
 
@@ -59,10 +65,13 @@ asks for it.
    POSIX `sh` for Linux (macOS later), PowerShell for Windows. Under Git Bash, MSYS or
    Cygwin the `sh` starter forwards to the PowerShell one, so a slot has exactly one lock
    implementation. Windows rules: skill `getty-bun-windows`.
-5. **Bootstrap is developed and tested here**, in `bootstrap/`, and only delivered through
-   Getty/skills. A skill directory has no CI.
-6. **Host order:** Codex first (briefing), then Claude Code (skilletor), then Hermes.
-   Handoff phase 3 splits into 3a (Codex) and 3b (Claude Code).
+5. **Bootstrap is developed and tested here**, in `bootstrap/`, and delivered through the
+   template `getty-bun-install` in `skills/` here, with CI
+   ([ADR 0009](adr/0009-first-release-claude-code-and-consumer-skills.md)).
+6. **Host order:** the first release carries the Codex and the Claude Code codec (phase
+   2b, [ADR 0009](adr/0009-first-release-claude-code-and-consumer-skills.md)); Hermes
+   later. Handoff phase 3 splits into 3a (briefing on Codex) and 3b (skilletor on
+   getty-bun).
 7. **The first complete path is a real consumer:** briefing's `SubagentStart` context
    (effect `add-context`, placement `subagent-input`). Ready commands, the dispatcher
    config, state and MCP follow when a consumer needs them.
@@ -79,7 +88,7 @@ asks for it.
 | Targets `linux-x64`, `linux-x64-baseline`, `linux-aarch64`, `windows-x64`, `windows-x64-baseline` | musl, `windows-aarch64`, macOS |
 | Lock, staging, atomic publish, receipt, bounded wait | Retention, last-working binding |
 | Bundled consumer entry | `bun install --frozen-lockfile` on the user machine, consumer lock |
-| SDK: `main()`, context, typed errors, effects `no-decision` and `add-context`, Codex `SessionStart` and `SubagentStart` | Dispatcher config, ready commands, Claude Code and Hermes codecs, state, MCP |
+| SDK: `main()`, context, typed errors, effects `no-decision`, `add-context`, `tool-permission`, `tool-input`, `notify-user`, combined effects, failure policy, the Codex and Claude Code codecs for the consumers' events | Dispatcher config, ready commands, Hermes codec, state, MCP |
 
 ## Starter interface (MVP)
 
@@ -161,7 +170,9 @@ code against one definition (the pin block format itself is defined with the ren
 ## SDK interface (MVP, phase 2)
 
 Decided in phase 2; the API, the error codes and the entry pattern are in
-[README.md](../README.md), "The SDK".
+[README.md](../README.md), "The SDK". Phase 2b changed parts of it (a third export
+`./claude-code`, exit 2 with `onFailure: "closed"`, more effects): the section
+"SDK interface for 0.1.0" below wins where they differ.
 
 - **Package.** `@getty/agent-bun-runtime`, exports `.` and `./codex`, ESM plus
   declarations in `dist/`, built by `tsc` (also as `prepack` of `bun pm pack`); no
@@ -185,10 +196,30 @@ Decided in phase 2; the API, the error codes and the entry pattern are in
 - **Effects.** `no-decision` and `add-context` (audience `model`, placement
   `session-start-input` or `subagent-input`); the codec rejects what it cannot deliver for
   the event, it never converts an effect. briefing also writes a user-visible
-  `systemMessage` on Codex; that effect comes with the 3a port (card `k26`).
-- **Pinning before the first release.** `dist/` is not in git, so a consumer that pins a
-  git commit (ADR 0006) gets no build unless its installer builds one; decided before
-  the 3a port (card `k28`).
+  `systemMessage` on Codex; that effect came with phase 2b (card `k26`).
+- **Pinning.** Consumers take the package from npm, from 0.1.0 on, never a git commit:
+  `dist/` is not in git ([ADR 0009](adr/0009-first-release-claude-code-and-consumer-skills.md);
+  card `k28` stays open for a later need).
+
+## SDK interface for 0.1.0 (phase 2b)
+
+Decided in [ADR 0009](adr/0009-first-release-claude-code-and-consumer-skills.md); the API
+is in [README.md](../README.md), "The SDK".
+
+- **Codecs** `@getty/agent-bun-runtime/codex` and `@getty/agent-bun-runtime/claude-code`;
+  `HookCodec` is opaque, plugins pick a codec and do not implement one. The host is
+  passed explicitly (the entry's argument or one entry per host), never guessed from
+  the environment.
+- **Unknown events** decode generically; only `no-decision` encodes for them.
+- **Effects** add `add-context` at `prompt-input` and `tool-result`, `tool-permission`
+  and `tool-input` for `PreToolUse`, and `notify-user` (`systemMessage`, `k26`); a
+  handler may return several effects, at most one per kind, merged into one output; a
+  codec rejects what its host cannot deliver.
+- **Failure policy** `onFailure: "open"` (exit 1, default) or `"closed"` (exit 2, a block
+  on `PreToolUse` and `UserPromptSubmit` in both hosts). The SDK returns 2 only when the
+  entry chose `"closed"`.
+- **Open unions:** `HostKind`, `HostSurface`, `ContextPlacement`, the effect kinds and
+  `ErrorCode` may grow in a minor release. The envelope carries `envelopeVersion: 1`.
 
 ## Phases and gates
 
@@ -197,8 +228,9 @@ Decided in phase 2; the API, the error codes and the entry pattern are in
 | 0 Boundary | ADRs 0001-0006, contract v0.2 in `getty-bun-integration` | Decisions recorded; no invented provider commands |
 | 1 Bootstrap MVP, Linux and Windows | Both starters, version table, pin render, one shared `bun:test` scenario suite run against both, CI matrix | All scenarios green on `ubuntu-latest`, `ubuntu-24.04-arm`, `windows-latest` under `powershell` (5.1) and `pwsh` (7); `shellcheck`; the per-hook cost on Windows measured and recorded |
 | 2 SDK MVP and Codex codec | Package, `main(): Promise<number>`, context, typed errors, Codex `SessionStart` and `SubagentStart`, bundling a consumer entry | `bun pm pack` tarball, bundled into a scratch consumer, runs through both starters offline |
+| 2b Claude Code codec, consumer skills, 0.1.0 | Starters ignore the project's Bun config (`k29`); Claude Code codec and the Codex events the consumers use; `tool-permission`, `tool-input`, `notify-user` with combined effects, failure policy; skills `getty-bun`, `getty-bun-integration`, `getty-bun-install` in `skills/`; release checklist | The phase 2 gate run from a hostile project directory, plus Claude Code payloads through both starters and a scratch plugin rendered from `getty-bun-install` whose starter runs a hook; all CI legs green; both reviewers |
 | 3a briefing on Codex | TypeScript port of briefing 0.6.0's Codex logic (`f7968f1`), hooks through the starter (`command` plus `commandWindows`), `.codex-plugin/plugin.json` back, CI | Real Codex (0.153.4 here) with isolated `HOME`, `CODEX_HOME` and `GETTY_HOME`: plugin install, hook trust, the first session installs Bun, a subagent receives its skills. Windows: a card on the windows-developer board |
-| 3b skilletor on getty-bun | Claude Code codec, Node replaced, render target for a plugin's `skills/`, the Claude Code adapter on Windows (open decision below) | skilletor's hooks run end to end in Claude Code and Codex, on Linux and Windows |
+| 3b skilletor on getty-bun | Node replaced, render target for a plugin's `skills/`, the Claude Code adapter on Windows (open decision below) | skilletor's hooks run end to end in Claude Code and Codex, on Linux and Windows |
 | 4 macOS | `lockf` or another lock primitive, `darwin` targets, CI `macos-latest` | The phase 1 scenarios on macOS |
 | 5 Grow on demand | Hermes codec, state backend, MCP companion, consumer dependency install with frozen lockfile and consumer lock | Handoff phases 4 and 5, only for what a consumer needs |
 | 6 Release and upgrade | Handoff phase 6 | Handoff release acceptance |
@@ -331,13 +363,14 @@ is not traced). briefing 0.6.0 already names `hooks/codex-hooks.json` in
   ([ADR 0005](adr/0005-bun-pin-and-version-table.md)).
 - Distribution of `@getty/agent-bun-runtime`: npm, public, Artistic-2.0
   ([ADR 0006](adr/0006-npm-distribution.md)). The org `getty` exists with the user
-  `getty` as owner, so the scope is the owner's; the package's earlier name was free
-  on 2026-11-25, the current one was not looked up on the registry (not checked). First
+  `getty` as owner, so the scope is the owner's; `@getty/agent-bun-runtime` was free on
+  the registry on 2026-11-26 (registry 404, looked up by the hub). First
   release by hand after review and the owner's go, then trusted publishing from GitHub
-  Actions with provenance, no long-lived token. Until the first release consumers pin a
-  git commit.
+  Actions with provenance, no long-lived token. Consumers take the package from npm, not
+  a git commit ([ADR 0009](adr/0009-first-release-claude-code-and-consumer-skills.md)).
 - Names ([ADR 0008](adr/0008-repository-and-package-name.md), 2026-11-25): repository
   `Getty/agent-bun-runtime`, checkout `~/dev/agent-bun-runtime`, package
-  `@getty/agent-bun-runtime` (not published yet). `getty-bun` stays the short name of
+  `@getty/agent-bun-runtime` (not published yet; release checklist:
+  [release-0.1.0.md](release-0.1.0.md)). `getty-bun` stays the short name of
   the runtime: the starters, `GETTY_HOME`, `GETTY_BUN_*`, the store and the
   `getty-bun-*` roles and skills.

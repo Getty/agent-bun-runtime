@@ -22,7 +22,9 @@ Write repository content in **English**.
   [getty-bun-bootstrap](.claude/skills/getty-bun-bootstrap/SKILL.md),
   [getty-bun-windows](.claude/skills/getty-bun-windows/SKILL.md).
 - **Ownership and verification:** [.claude/rules/getty-bun-rules.md](.claude/rules/getty-bun-rules.md).
-- **Runtime contract:** skill `getty-bun-integration` (contract proposal v0.2).
+- **Runtime contract:** skill `getty-bun-integration`, now in [skills/](skills/) with the
+  consumer skills `getty-bun` and `getty-bun-install` (ADR 0009). `skills/` is what
+  consumers install; the team skills stay under `.claude/skills/`.
 
 ## The agent team
 
