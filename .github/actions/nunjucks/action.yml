@@ -1,0 +1,25 @@
+name: nunjucks
+description: >-
+  Installs nunjucks 3.2.4 (the version skilletor renders templates with) into a scratch
+  directory outside the checkout and exports GETTY_BUN_TEST_NUNJUCKS=<that directory>.
+  Needs bun on PATH (the harness Bun from setup-bun) and runs after checkout.
+
+runs:
+  using: composite
+  steps:
+    - name: Install nunjucks 3.2.4 into a scratch directory
+      shell: bash
+      run: |
+        set -eu
+        dir="$RUNNER_TEMP/njk"
+        mkdir "$dir"
+        cd "$dir"
+        # Exact pin, no range; the directory is fresh, so no lockfile exists to follow.
+        bun add --exact nunjucks@3.2.4
+        version=$(bun -e 'console.log(require("./node_modules/nunjucks/package.json").version)')
+        if [ "$version" != "3.2.4" ]; then
+          echo "installed nunjucks $version, expected 3.2.4" >&2
+          exit 1
+        fi
+        # $RUNNER_TEMP is a native path on Windows runners (C:\...), which the tests accept.
+        echo "GETTY_BUN_TEST_NUNJUCKS=$dir" >> "$GITHUB_ENV"

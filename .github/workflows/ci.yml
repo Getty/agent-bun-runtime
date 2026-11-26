@@ -85,6 +85,7 @@ jobs:
             exit 1
           }
           "no parse errors under PowerShell $($PSVersionTable.PSVersion)"
+      - uses: ./.github/actions/nunjucks
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .dev/fixtures
@@ -107,6 +108,7 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ env.HARNESS_BUN_VERSION }}
+      - uses: ./.github/actions/nunjucks
       - name: shellcheck
         run: |
           shellcheck --version
@@ -128,6 +130,13 @@ jobs:
         env:
           # The Bun the starters pin (bootstrap/versions.json); separate from the harness Bun.
           PIN_VERSION: "1.4.5"
+      - name: Install template matches the starters
+        # The generated .njk files are current (text and exec bit) ...
+        run: bun bootstrap/render-template.ts --check
+      - name: Install template renders byte for byte through real nunjucks
+        # ... and rendered with nunjucks 3.2.4 every table version yields the starter with
+        # that version's pin block.
+        run: bun bootstrap/render-template.ts --nunjucks "$GETTY_BUN_TEST_NUNJUCKS/node_modules/nunjucks"
 
   real-download:
     # The plan asks for one real-download job. Two legs of one job (the ci-worker's call):
@@ -273,6 +282,7 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ env.HARNESS_BUN_VERSION }}
+      - uses: ./.github/actions/nunjucks
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .dev/fixtures
