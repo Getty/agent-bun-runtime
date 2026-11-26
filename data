@@ -1,0 +1,17 @@
+---
+class: standard
+completed: 2026-11-26T20:06:30Z
+created: 2026-11-25T04:44:32Z
+id: 1
+priority: high
+started: 2026-11-26T20:06:30Z
+status: done
+tags:
+- phase-0
+title: 'Phase 0: boundary ADRs and contract v0.2'
+updated: 2026-11-26T20:06:34Z
+---
+
+ADRs 0001-0006 in docs/adr/ (layout and delivery, install on demand, bundled entry, one starter per OS, Bun pin and version table, npm distribution). Contract v0.2 in Getty/skills getty-bun-integration: the starter installs on demand under the OS lock, bounded waiting, SDK never installs, bundled entry, GETTY_HOME, Windows starter rules. Gate: decisions recorded, no invented provider commands.
+
+Closed in phase 2b (brief 2026-11-26 point 10): phase 0 finished long ago.
