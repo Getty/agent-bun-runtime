@@ -38,7 +38,10 @@ Revision history for agent-bun-runtime
     PreToolUse, PostToolUse and CwdChanged.
   - main() takes onFailure: "open" (default) exits 1 on failure and "closed"
     exits 2, which both hosts read as a block on PreToolUse and
-    UserPromptSubmit. One stderr line with a typed error code either way.
+    UserPromptSubmit. Exit 2 also acts on Stop and SubagentStop (the agent
+    keeps working) and other events, so "closed" belongs only on entries
+    that serve nothing but PreToolUse and UserPromptSubmit. One stderr line
+    with a typed error code either way.
   - Starters run Bun without the project's bunfig.toml, .env files and
     BUN_OPTIONS, so a hook started in a hostile project directory runs
     the same code as anywhere else.

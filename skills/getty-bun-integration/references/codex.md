@@ -138,6 +138,12 @@ Source-checked, not executed:
   on `PostToolUse` it rejects the result as feedback to the model, the tool has already run
   (`post_tool_use.rs:264-280`). The SDK's one line is never empty, so an entry with
   `onFailure: "closed"` blocks there when it fails.
+- **`Stop`, `SubagentStop`:** exit 2 with non-empty stderr blocks the stop and the stderr
+  becomes the continuation prompt: Codex keeps working with the SDK's error line as its
+  prompt (`stop.rs:330-355`, `codex-rs/core/src/session/turn.rs:882-899`). On
+  `PermissionRequest` exit 2 denies (`permission_request.rs:263-278`); on `PreCompact`
+  and `PostCompact` it is a plain failure (`compact.rs:318-325`). So `"closed"` only on
+  entries that serve nothing but `PreToolUse` or `UserPromptSubmit`.
 - Exit 1 fails the hook and Codex goes on, unless the hook is configured with
   `onFailure: "block"` and runs synchronously (`pre_tool_use.rs:285-305`, `common.rs:74-90`).
   An async hook (`"async": true`) can apply neither exit 2 nor a decision

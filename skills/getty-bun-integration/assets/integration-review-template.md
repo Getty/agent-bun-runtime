@@ -19,7 +19,7 @@ Contract version 1 (`gettyBun.contractVersion`), agent-bun-runtime release: ____
 | `getty-bun.sh` and `getty-bun.ps1` copied from the rendered `getty-bun-install` and committed under `bootstrap/`; CI: pin block equals package.json, a fresh render equals the committed copy | | |
 | `@getty/agent-bun-runtime` from npm at the release's exact version, bundled; entry ends with `process.exit(await main(...))`; host passed by entry or argument, not detected | | |
 | Bundled entry committed (`bun build --target=bun`); CI rebuild byte-identical; no external packages | | |
-| `onFailure` chosen per entry (`"closed"` for guards); `maxInputBytes` fits the largest expected payload | | |
+| `onFailure` chosen per entry (`"closed"` only for guards on entries serving nothing but `PreToolUse`/`UserPromptSubmit`; `"open"` on any entry that serves `Stop`, `SubagentStop` or another event); `maxInputBytes` fits the largest expected payload | | |
 | Effects per event within what the codec delivers; handler never writes stdout | | |
 | Bun child processes started with `--no-install --config=<empty file> --no-env-file`, `BUN_OPTIONS` removed | | |
 | Hooks call the starter's `run`; only `run`, `ensure`, `status` used | | |

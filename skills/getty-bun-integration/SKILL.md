@@ -60,7 +60,10 @@ you observed it.
   through unchanged. Entry codes stay within 0–255; no entry argument begins with `-`
   (both limits come from Windows and hold on every OS).
 - **The entry exits 0, 1, or 2 only with `onFailure: "closed"`.** Both hosts read 2 on
-  `PreToolUse` and `UserPromptSubmit` as a block.
+  `PreToolUse` and `UserPromptSubmit` as a block, but also act on it elsewhere: on `Stop`
+  and `SubagentStop` it keeps the agent working. `"closed"` only on an entry that serves
+  nothing but `PreToolUse` or `UserPromptSubmit`; any other entry keeps `"open"` (split
+  the entry when a guard needs `"closed"`).
 - **The host is passed explicitly**: one entry per host, or the host as the entry's
   argument. Codex sets `CLAUDE_PLUGIN_ROOT` too; never detect the host from the
   environment.

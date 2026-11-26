@@ -74,7 +74,7 @@ CI 45883791115.)
 |---|---|---|
 | `codec` | required | `codex` or `claudeCode` |
 | `handler` | required | `(context) => effect \| effect[]`, sync or async |
-| `onFailure` | `"open"` | `"open"`: failures exit 1, the host goes on. `"closed"`: failures exit 2, a block on `PreToolUse` and `UserPromptSubmit`. A guard that must not let a tool run when it fails picks `"closed"`. Anything else: `INTERNAL_ERROR`, exit 1, before stdin is read |
+| `onFailure` | `"open"` | `"open"`: failures exit 1, the host goes on. `"closed"`: failures exit 2, a block on `PreToolUse` and `UserPromptSubmit`, and an action on other events (on `Stop` and `SubagentStop` the agent keeps working). Only an entry that serves nothing but `PreToolUse` or `UserPromptSubmit` picks `"closed"`, as a guard that must not let a tool or prompt through when it fails; any other entry keeps `"open"`, and a guard gets its own entry or hook command. `main()` sees only the current event and does not check this. Anything else: `INTERNAL_ERROR`, exit 1, before stdin is read |
 | `maxInputBytes` | `DEFAULT_MAX_INPUT_BYTES` (1 MiB) | Bound for the hook object. It applies before the event is known: an event that needs a larger bound (big `Write` or `PostToolUse` payloads) gets its own hook command with an argument the entry maps to a larger value |
 | `stdin`, `stdout`, `stderr`, `env`, `cwd` | the real process | Injection for tests ([Testing](#testing)) |
 
@@ -139,7 +139,10 @@ effect lists encode; trust those tables over this one. Malformed effects are
 
 Codes: `HOOK_INPUT_INVALID`, `HOOK_EFFECT_INVALID`, `HOOK_EFFECT_UNSUPPORTED`,
 `HANDLER_FAILED`, `OUTPUT_FAILED` (stdout may hold bytes), `INTERNAL_ERROR`. Every
-decision travels as JSON with exit 0; exit 2 is never a way to deny. How each host shows
+decision travels as JSON with exit 0; exit 2 is never a way to deny. Exit 2 is not only
+a block: on `Stop` and `SubagentStop` both hosts keep the agent working, and Claude Code
+also blocks `PreCompact`, `ConfigChange` and more on it, so `"closed"` stays on entries
+that serve only `PreToolUse` or `UserPromptSubmit`. How each host shows
 exit 1 and 2 per event: [codex.md](codex.md), [claude-code.md](claude-code.md). Codex
 discards stdout and stderr of a failed start hook, so the line shows only in a manual run.
 

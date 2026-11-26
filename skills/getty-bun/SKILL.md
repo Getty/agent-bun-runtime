@@ -79,8 +79,10 @@ How hosts show them:
 
 - **Claude Code** reports a non-zero exit with stderr verbatim (measured by
   windows-developer). Exit 2 on `PreToolUse` or `UserPromptSubmit` blocks the tool call
-  or prompt; exit 1 lets it go on (documented in Claude Code's hooks reference, not
-  executed by agent-bun-runtime).
+  or prompt; exit 1 lets it go on. Exit 2 on `Stop` or `SubagentStop` keeps Claude
+  working, and blocks `PreCompact` and `ConfigChange` (documented in Claude Code's hooks
+  reference, not executed by agent-bun-runtime): an entry that chose `"closed"` belongs
+  on `PreToolUse` or `UserPromptSubmit` only.
 - **Codex**, start hooks (`SessionStart`, `SubagentStart`): any non-zero exit fails the
   hook and discards stdout and stderr, so the line is not shown; the session goes on
   unless the hook is configured `onFailure: "block"`. On `UserPromptSubmit` and

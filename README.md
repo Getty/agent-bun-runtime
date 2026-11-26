@@ -234,6 +234,14 @@ It handles the Codex command hooks `SessionStart`, `SubagentStart`, `UserPromptS
   (`pre_tool_use.rs:285-305`, `codex-rs/hooks/src/events/common.rs:74-90`). An async
   hook (`"async": true`) can apply neither exit 2 nor a decision
   (`codex-rs/hooks/src/engine/mod.rs:199-214`).
+- Exit 2 on events the codec decodes generically (source-checked): on `Stop` and
+  `SubagentStop` exit 2 with non-empty stderr blocks the stop and the stderr becomes the
+  continuation prompt, so Codex keeps working with the SDK's error line as its prompt
+  (`codex-rs/hooks/src/events/stop.rs:330-355`,
+  `codex-rs/core/src/session/turn.rs:882-899`); on `PermissionRequest` it denies the
+  request (`permission_request.rs:263-278`). On `PreCompact` and `PostCompact` exit 2 is
+  a plain failure like 1 (`compact.rs:318-325`). Hence `"closed"` only on entries that
+  serve nothing but `PreToolUse` or `UserPromptSubmit` ([Exit codes](#exit-codes)).
 - In Codex any non-zero exit fails a start hook: stdout and stderr are discarded, so the
   SDK's stderr line is not shown (source-checked,
   `codex-rs/hooks/src/events/session_start.rs:316-330`). The turn stops only when the
@@ -345,8 +353,17 @@ The SDK returns 2 only when the entry chose `onFailure: "closed"`: both hosts re
 on `PreToolUse` and `UserPromptSubmit` as a block, and Codex blocks only with a non-empty
 stderr, which the one line always is (Codex source-checked at `3f65e9f`:
 `codex-rs/hooks/src/events/pre_tool_use.rs:268-284`, `user_prompt_submit.rs:229-245`,
-see [The Codex codec](#the-codex-codec); Claude Code doc-checked below). A guard that must not let a tool run when it fails picks `"closed"`; with
-`"open"` the host goes on. An `onFailure` other than `"open"` or `"closed"` is
+see [The Codex codec](#the-codex-codec); Claude Code doc-checked below). Exit 2 is not
+a block on these two events alone: in both hosts it acts on other events too, on `Stop`
+and `SubagentStop` by keeping the agent working (below). So `"closed"` belongs only on an
+entry whose hooks serve nothing but `PreToolUse` or `UserPromptSubmit`: a guard there that
+must not let a tool call or a prompt through when it fails picks `"closed"`. An entry that
+also serves any other event keeps `"open"`; a guard that needs `"closed"` gets its own
+entry for those two events, or its own hook command whose argument the entry maps to the
+policy. `main()` sees only the event at hand, not the events its command is wired to, so
+the SDK does not check this rule. With `"open"` the host goes on, except where any
+non-zero exit counts (Claude Code's `WorktreeCreate` and `WorktreeRemove`, below). An
+`onFailure` other than `"open"` or `"closed"` is
 `INTERNAL_ERROR` and exit 1, before stdin is read: the intended policy is unknown. The
 codes stay within 0–255. On `OUTPUT_FAILED` stdout may
 already hold bytes. Line breaks in the message become spaces. The codes:
@@ -364,7 +381,8 @@ An `AgentRuntimeError` the handler throws keeps its own code. Through a starter,
 entry's exit code reaches the host unchanged.
 
 In Claude Code (doc-checked against https://code.claude.com/docs/en/hooks, fetched
-2026-11-26; line numbers of its markdown `hooks.md`; not executed):
+2026-11-26T20:08Z and again at 21:44Z with identical content; line numbers of its
+markdown `hooks.md`; not executed):
 
 - Exit 2 with nothing on stdout is a blocking error, and the stderr is the reason
   (`hooks.md:808`, `:817`, `:850`). On `PreToolUse` it blocks the tool call and routes
@@ -373,11 +391,24 @@ In Claude Code (doc-checked against https://code.claude.com/docs/en/hooks, fetch
   `reason`, which is shown to the user (`:1040`, `:1588`). On `PostToolUse` Claude sees
   the stderr, the tool has already run (`:1050`); on `SessionStart` and `CwdChanged` the
   user sees it and nothing is blocked (`:1056`, `:1059`).
-- Exception: when a plugin's `UserPromptSubmit` hook exits 2 with nothing on stdout and
-  its stderr says a file is missing, such as `No such file or directory`, Claude Code
-  treats it as a non-blocking error (`:823`). The SDK's line carries the handler's error
-  message, so a `"closed"` entry whose handler fails with such a message does not block
-  the prompt.
+- Exit 2 acts on further events (table "Exit code 2 behavior per event",
+  `:1030-1071`). On `Stop` it keeps Claude from stopping and the conversation goes on
+  (`:1043`); on `SubagentStop` the subagent keeps working (`:1044`). It blocks compaction
+  on `PreCompact` (`:1062`) and keeps a configuration change from taking effect on
+  `ConfigChange` (`:1048`); it blocks or rolls back `UserPromptExpansion`,
+  `PreSkillShellCommand`, `TeammateIdle`, `TaskCreated`, `TaskCompleted`,
+  `PostToolBatch`, `PreModelSwitch`, `Elicitation` and `ElicitationResult`
+  (`:1041-1069`). On `WorktreeCreate` and `WorktreeRemove` every non-zero exit, 1
+  included, makes the operation fail (`:1068-1069`). A `"closed"` entry that fails on
+  `Stop`, `SubagentStop`, `TeammateIdle` or `TaskCompleted` sends Claude back to work,
+  and Claude cannot repair a hook that fails; that is why Claude Code's own
+  `"onFailure": "block"` has no effect on those events (`:992-994`), while the SDK's
+  exit 2 is a real exit 2 there.
+- Exception: when a `Stop`, `SubagentStop` or `TaskCompleted` hook, or a plugin's
+  `UserPromptSubmit` hook, exits 2 with nothing on stdout and its stderr says a file is
+  missing, such as `No such file or directory`, Claude Code treats it as a non-blocking
+  error (`:823`). The SDK's line carries the handler's error message, so a `"closed"`
+  entry whose handler fails with such a message does not block on those events.
 - Exit 1 with nothing on stdout is a non-blocking error: the action goes ahead and a
   `<hook name> hook error` notice carries the stderr (`:809`, `:817`, `:880-882`),
   unless the hook is configured with `"onFailure": "block"` (Claude Code 2.1.295 or

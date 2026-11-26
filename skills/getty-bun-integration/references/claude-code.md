@@ -107,15 +107,25 @@ Documented (hooks reference, 2026-11-26), not executed:
   `PreToolUse` it blocks the call like `deny`; on `UserPromptSubmit` it rejects the
   prompt and shows stderr to the user; on `PostToolUse` Claude sees stderr, the tool has
   already run; on `SessionStart` and `CwdChanged` the user sees it and nothing is blocked.
-- Exception: a plugin's `UserPromptSubmit` hook that exits 2 with a "file is missing"
-  stderr (such as `No such file or directory`) is a non-blocking error. The SDK's line
-  carries the handler's message, so a `"closed"` entry whose handler fails with such a
-  message does not block the prompt.
+- Exception: a `Stop`, `SubagentStop` or `TaskCompleted` hook, or a plugin's
+  `UserPromptSubmit` hook, that exits 2 with a "file is missing" stderr (such as
+  `No such file or directory`) is a non-blocking error. The SDK's line carries the
+  handler's message, so a `"closed"` entry whose handler fails with such a message
+  does not block on those events.
 - Exit 1 with nothing on stdout is a non-blocking error: the action goes ahead with a
   `<hook name> hook error` notice carrying stderr, unless the hook is configured with
   `"onFailure": "block"` (2.1.295 or later), which makes it act like exit 2.
-- So an entry that guards a tool call picks `main({ onFailure: "closed" })`, or the hook
-  `"onFailure": "block"`; decisions themselves go as JSON with exit 0.
+- Exit 2 acts on more events ("Exit code 2 behavior per event"): on `Stop` Claude keeps
+  working instead of stopping, on `SubagentStop` the subagent does; it blocks
+  `PreCompact`, `ConfigChange`, `TeammateIdle`, `TaskCompleted`, `PostToolBatch` and
+  others. Claude cannot repair a hook that keeps failing on `Stop`, `SubagentStop`,
+  `TeammateIdle` or `TaskCompleted`, which is why Claude Code's own `"onFailure":
+  "block"` has no effect there; the SDK's exit 2 does. On `WorktreeCreate` and
+  `WorktreeRemove` any non-zero exit, 1 included, fails the operation.
+- So an entry that serves only `PreToolUse` or `UserPromptSubmit` and guards them picks
+  `main({ onFailure: "closed" })`, or the hook `"onFailure": "block"`; an entry that
+  serves any other event keeps `"open"` (give the guard its own entry). Decisions
+  themselves go as JSON with exit 0.
 
 ## Windows: open decision
 
