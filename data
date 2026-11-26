@@ -1,0 +1,40 @@
+---
+claimed_at: 2026-11-26T21:14:24Z
+claimed_by: getty-bun-sdk-worker
+class: standard
+completed: 2026-11-26T21:14:24Z
+created: 2026-11-25T17:29:56Z
+id: 26
+priority: medium
+started: 2026-11-26T20:39:50Z
+status: done
+tags:
+- sdk
+- codex
+- phase-3a
+title: 'SDK: effect for a user-visible message (Codex systemMessage) for briefing
+  in 3a'
+updated: 2026-11-26T21:14:24Z
+---
+
+Found while scoping k3. briefing on Codex (f7968f1, .claude/skills/briefing-core/references/hook-contract.md) writes a top-level systemMessage on SessionStart (declarations that do not work) and on SubagentStart (audit line, errors). The phase 2 MVP has only the effects no-decision and add-context, so the port in phase 3a needs an effect for a user-visible message (Codex systemMessage) and its combination with add-context on SubagentStart. Decide the effect name and semantics with the 3a port; source-check the Codex output key at the pinned commit.
+
+Pulled into 0.1.0 by the owner (phase 2b question, answer 1, 2026-11-26): effect notify-user -> systemMessage, handler may return several effects, at most one per kind.
+
+sdk-worker: started core change. Plan: NotifyUserEffect, validateEffects (list rules), codec encode takes the normalized frozen list; codecs reject lists >1 and notify-user with HOOK_EFFECT_UNSUPPORTED until the codec workers merge.
+
+sdk-worker core done (not handed off; codec workers follow). Added NotifyUserEffect {kind:notify-user,text} (non-empty string); HookHandler returns HookEffect | readonly HookEffect[] (or a Promise of either); validateEffects in src/effects.ts normalizes to a frozen non-empty list: empty list, duplicate kind, no-decision beside another effect are HOOK_EFFECT_INVALID; tool-permission+tool-input allowed in the core, the codec decides. CodecImplementation.encode now takes (effects: readonly HookEffect[], invocation) and builds one output. codex.ts and claude-code.ts: mechanical only, single effect unchanged; a list of >1 and notify-user throw HOOK_EFFECT_UNSUPPORTED (encode) for the codec workers to replace. Exports NotifyUserEffect; README Public API, error table, intro and tool doc (PreToolUse+PostToolUse) updated. Checks: typecheck clean; bun test ./test/ 226 pass 20 skip (gate placeholder+gate suite without env, win32-only control) 0 fail; gate sh 17 pass 0 fail; dist removed.
+
+codex-worker (Codex part) done, not moved: src/codex.ts encode merges the frozen effect list into ONE object, keys hookSpecificOutput then systemMessage (independent of list order; inside hookSpecificOutput hookEventName first). notify-user -> top-level systemMessage on SessionStart, SubagentStart, UserPromptSubmit, PreToolUse, PostToolUse (source-checked openai/codex 3f65e9f: universal wire schema.rs:88-100 flattened into every output wire; Warning entry session_start.rs:258-263, user_prompt_submit.rs:164-169, pre_tool_use.rs:224-229, post_tool_use.rs:198-203; not rejected by output_parser.rs:369-379, :393-399, :499-505; TUI hook_cell.rs:281-330, sync non-builtin hooks only hook_runtime.rs:962-964). tool-permission+tool-input -> HOOK_EFFECT_UNSUPPORTED (output_parser.rs:444-450). Lone-surrogate check on notify-user text. Events without rules: still only no-decision (SessionEnd ignores stdout session_end.rs:96-110; Interrupt only systemMessage schema.rs:482-489). Fixtures: output/notify-user.json, session-start.add-context.notify-user.out, user-prompt-submit.add-context.notify-user.out, schema-checked (jsonschema 4.19.2, Draft 7, generated *.command.output.schema.json) plus other shapes; fixtures README and README 'The Codex codec' updated. Checks: typecheck clean; bun test ./test/ 226 pass 20 skip 0 fail; scratch check in .dev/k26 6 pass (mutation of key order goes red). Open for sdk-test-writer: test/codex.test.ts has no notify-user/list cases yet (fixture byte equality both orders, notify alone x5 events, deny/tool-input+notify, permission+input unsupported, surrogate in notify text, generic event notify unsupported).
+
+2026-11-26 20:49 Claude Code part (getty-bun-claude-worker), uncommitted: src/claude-code.ts encode takes the validated list and writes ONE object. notify-user -> top-level systemMessage on SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, CwdChanged (hooks.md:1115, :1014, :3222; schema NM cc@338276066; parser rse copies it for any event cc@345564904; runner QD shows hook_system_message cc@345682277; CwdChanged via $3o cc@345534496 = terminal notification only, not in -p/stream). Generic events: still only no-decision, since hooks.md:749/:1106 say some events discard systemMessage or deliver it elsewhere, e.g. DirectoryAdded to Claude (:3267). Combos: add-context+notify-user; tool-permission+tool-input in one hookSpecificOutput (allow/ask, hooks.md:2093, example :2102-2114, AskUserQuestion :2154); deny+tool-input -> HOOK_EFFECT_UNSUPPORTED (no documented meaning). Fixed key order: systemMessage, hookSpecificOutput{hookEventName, permissionDecision, permissionDecisionReason, updatedInput, additionalContext}. Cap comment covers systemMessage (QDe=1e4 cc@330696271, jEe cc@337801045). Caveat documented: an async hook's systemMessage goes to Claude, not the user (hooks.md:4301). Fixtures: output/notify-user.out (event list of the five), session-start.add-context.notify-user.out, pre-tool-use.allow.tool-input.out; effects.json now uses an 'effects' list per row and 'event' may be a list (test-writer: adapt a fixture driver). README section fixed (updatedInput+allow line). Checks: typecheck exit 0; bun test ./test/ 226 pass, 20 skip (gate unset, win32-only), 0 fail; ad-hoc fixture driver 507/0. No test/*.ts for the Claude Code codec exists yet (test-writer lane).
+
+sdk-test-writer: notify-user covered: effects validation (non-empty text, unknown fields), Codex (alone on 5 events, with add-context/deny/tool-input in either order, generic event unsupported, surrogate text) in test/codex-events.test.ts, Claude Code (every notify row of effects.json on 5 events incl. CwdChanged, merge order) in test/claude-code.test.ts. Red shown: Codex key order swap and surrogate check removed, Claude Code generic-event notify encoded.
+
+Core + both codecs + tests in tree; to review.
+
+2026-11-26 21:04 Review (getty-bun-reviewer, uncommitted 2b tree on phase-2b-claude-code): local checks green with harness Bun 1.4.5: install --frozen-lockfile (bun.lock unchanged), typecheck, bun test ./test/ 646 pass/49 skip (gate files + Windows-only), gate sh 40/40 (no skip), bootstrap sh 116 pass/20 skip (Windows/real download), render-template --check and --nunjucks, render-pin --check, dash -n, pack --dry-run (dist + README + LICENSE + package.json). No CI run on this diff yet; Windows legs pending. Verdict k26: GO. notify-user + effect lists match owner answer option 1 (at most one per kind, no-decision alone); skilletor 3641b4b src/hooks.ts pairs verified.
+
+Re-review (getty-bun-reviewer, uncommitted 2b tree): harness Bun 1.4.5: install --frozen-lockfile, typecheck, bun test ./test/ 606 pass/49 skip/0 fail (fewer tests: the dropped unread-key type tables), gate sh 40/40 no skip, bootstrap CI=1 sh 116 pass/20 skip (Windows, real download), render-template --check and --nunjucks, render-pin --check, dash -n, pack --dry-run (getty-agent-bun-runtime-0.1.0.tgz, dist+README+LICENSE+package.json); dist/ removed. CI on this diff not run yet. Verdict k26: GO for commit.
+
+Committed in 6ff253b
