@@ -724,11 +724,13 @@ function Invoke-GettyBun([string]$ScriptPath, [string[]]$Argv) {
     # resolution, env-chosen caches, the macOS webview host (k40). Removed from this
     # process, so the probe and the entry inherit the environment without them; never
     # through ProcessStartInfo.EnvironmentVariables, which throws on names that differ only
-    # in case (Path and PATH under MSYS or Cygwin).
+    # in case (Path and PATH under MSYS or Cygwin). [NullString]::Value, not $null: PowerShell
+    # hands $null to a string parameter as "", and from .NET 9 on (pwsh 7.5+) "" keeps an
+    # empty variable instead of deleting it (an empty BUN_INSPECT_PRELOAD is a preload of "").
     foreach ($name in @('BUN_OPTIONS', 'BUN_INSPECT_PRELOAD', 'BUN_INSPECT',
             'BUN_INSPECT_CONNECT_TO', 'NODE_PATH', 'NODE_COMPILE_CACHE',
             'BUN_RUNTIME_TRANSPILER_CACHE_PATH', 'BUN_INTERNAL_WEBVIEW_HOST')) {
-        [Environment]::SetEnvironmentVariable($name, $null)
+        [Environment]::SetEnvironmentVariable($name, [NullString]::Value)
     }
 
     $gettyHome = Get-GettyHome
