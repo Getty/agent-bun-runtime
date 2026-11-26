@@ -5,7 +5,9 @@ Status: adapted from the handoff on 2026-11-25. Phase 1 (the bootstrap starters 
 45603412444. Phase 2 (the SDK core and the Codex codec) is complete: merged into `main`
 at `0bc8218` (PR 2), gate green in CI run 45885263188. Phase 2b (the Claude Code codec,
 the consumer skills and release 0.1.0, [ADR 0009](adr/0009-first-release-claude-code-and-consumer-skills.md))
-is being built on branch `phase-2b-claude-code`; phase 3 onward is not implemented yet.
+is complete: merged into `main` at `4f9c556` (PR 3) and `b577af7` (PR 4), gate green in
+CI runs 45907098883 (pull request) and 45908923306 (`main`), and released as 0.1.0 (tag
+`v0.1.0`, npm). Phase 3 onward is not implemented yet.
 Source: [handoff/2026-11-25-bun-runtime-handoff.md](handoff/2026-11-25-bun-runtime-handoff.md).
 Where this plan and the handoff disagree, this plan wins; the deviations are listed below
 and recorded as ADRs in [adr/](adr/).
@@ -370,7 +372,7 @@ is not traced). briefing 0.6.0 already names `hooks/codex-hooks.json` in
   a git commit ([ADR 0009](adr/0009-first-release-claude-code-and-consumer-skills.md)).
 - Names ([ADR 0008](adr/0008-repository-and-package-name.md), 2026-11-25): repository
   `Getty/agent-bun-runtime`, checkout `~/dev/agent-bun-runtime`, package
-  `@getty/agent-bun-runtime` (not published yet; release checklist:
+  `@getty/agent-bun-runtime` (on npm since 0.1.0; release checklist:
   [release-0.1.0.md](release-0.1.0.md)). `getty-bun` stays the short name of
   the runtime: the starters, `GETTY_HOME`, `GETTY_BUN_*`, the store and the
   `getty-bun-*` roles and skills.

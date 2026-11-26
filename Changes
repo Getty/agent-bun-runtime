@@ -1,6 +1,8 @@
 Revision history for agent-bun-runtime
 
 {{$NEXT}}
+
+0.1.0     2026-11-26 23:35:17Z
   - POSIX starter bootstrap/getty-bun.sh with run, ensure and status:
     installs the pinned Bun on demand under a lock, then runs the given
     entry on it. An empty installed executable makes the slot a mismatch:
@@ -16,10 +18,10 @@ Revision history for agent-bun-runtime
   - Shared scenario suite (bootstrap/test) runs the starter against a
     local fixture server with an isolated GETTY_HOME.
   - Repository Getty/agent-bun-runtime (renamed; GitHub redirects the old
-    URL) and SDK package @getty/agent-bun-runtime, not published yet.
+    URL) and SDK package @getty/agent-bun-runtime on npm.
     getty-bun stays the name of the starters, the GETTY_BUN_* variables
     and the store under ~/.getty/runtimes/bun.
-  - SDK @getty/agent-bun-runtime (not published yet): main() reads one
+  - SDK @getty/agent-bun-runtime: main() reads one
     hook object from stdin, runs the handler and writes its effects to
     stdout. A handler returns one effect or a list, at most one of each
     kind: no-decision, add-context (placements session-start-input,

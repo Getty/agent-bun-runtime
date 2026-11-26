@@ -42,9 +42,11 @@ Getty's Bun runtime for agent plugins, `getty-bun` for short
 Status: phase 1 (the starters) is merged into `main` at `262bc95` (PR 1), phase 2 (the
 SDK core and the Codex codec) at `0bc8218` (PR 2). Phase 2b (the Claude Code codec, the
 consumer skills, release preparation for 0.1.0,
-[ADR 0009](docs/adr/0009-first-release-claude-code-and-consumer-skills.md)) is on branch
-`phase-2b-claude-code`. Nothing is released: no tag, nothing on npm; the steps are in
-[docs/release-0.1.0.md](docs/release-0.1.0.md). Plan and phases: [docs/plan.md](docs/plan.md).
+[ADR 0009](docs/adr/0009-first-release-claude-code-and-consumer-skills.md)) is merged
+into `main` at `4f9c556` (PR 3), the last fixes before the release at `b577af7` (PR 4).
+Released: 0.1.0, tag `v0.1.0`, on npm as `@getty/agent-bun-runtime`; the release steps
+are in [docs/release-0.1.0.md](docs/release-0.1.0.md). Plan and phases:
+[docs/plan.md](docs/plan.md).
 
 ## The SDK: `@getty/agent-bun-runtime`
 
