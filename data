@@ -1,0 +1,23 @@
+---
+class: standard
+completed: 2026-11-26T20:25:55Z
+created: 2026-11-26T20:06:15Z
+id: 35
+priority: low
+started: 2026-11-26T20:25:55Z
+status: done
+tags:
+- sdk
+- tests
+- phase-2b
+title: 'test/input.test.ts:162: await the rejects assertion'
+updated: 2026-11-26T20:25:55Z
+---
+
+Hub review F3: expect(...).rejects.toThrow(RangeError) without await cannot fail reliably.
+
+Added await to the rejects assertion (test/input.test.ts:162). Verified it can fail: scratch copy with toThrow(TypeError) -> 4 fail with await. Without await (HEAD form) see report. Real file: 26 pass.
+
+Correction: the HEAD (no await) form also reported 4 fail under the same TypeError break on Bun 1.4.5, so here the unawaited rejection was still attributed; the await makes that deterministic instead of timing-dependent. Not a demonstrated silent pass.
+
+Committed in 96b0dca
