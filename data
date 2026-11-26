@@ -1,0 +1,31 @@
+---
+claimed_at: 2026-11-26T21:14:35Z
+claimed_by: getty-bun-sdk-worker
+class: standard
+completed: 2026-11-26T21:14:35Z
+created: 2026-11-26T20:06:01Z
+id: 31
+priority: high
+started: 2026-11-26T20:26:14Z
+status: done
+tags:
+- sdk
+- phase-2b
+title: 'Phase 2b: effects for PreToolUse (permission decision, updated input) and
+  the public interface before 0.1.0'
+updated: 2026-11-26T21:14:35Z
+---
+
+Brief points 3 and 4. Effects loadguard needs: PreToolUse permission decision with reason, updatedInput, per host as far as the host can; otherwise a typed error. Interface decisions (ADR 0009): codec output carries stdout, stderr and exit code; failure policy per handler (fail-open/fail-closed) and input bound per event; unknown events decoded generically; names of the unions (claude-code, placements) and whether they grow; host passed explicitly via subpath entry; contractVersion naming. Never 2 rule restated.
+
+Started (sdk-worker): HookCodec as a class with a #private implementation (nominal type, runtime brand check, nothing internal in its d.ts shape); generic decode helper in src/codec.ts; onFailure open|closed; new effects tool-permission/tool-input; placements prompt-input/tool-result; envelopeVersion; optional invocation.tool.
+
+Done (sdk-worker, uncommitted on phase-2b-claude-code): HostKind adds claude-code; envelopeVersion replaces contractVersion; optional invocation.tool via createInvocation (absent when undefined, frozen); placements prompt-input, tool-result; effects tool-permission (allow|deny|ask, reason required for deny) and tool-input (plain JSON object, deep-checked); HOOK_EVENT_UNSUPPORTED removed; decodeGenericEvent in src/codec.ts, Codex decodes unknown events generically (only no-decision encodes); HookCodec is a class with #private + private constructor (nominal, runtime brand check in main, INTERNAL_ERROR otherwise), defineCodec/codecImplementation internal, DecodeInputs no longer exported; main onFailure open|closed (closed = exit 2), invalid value = INTERNAL_ERROR exit 1 before stdin. README Public API, Exit codes, codes table, Codex codec updated. Mechanical test updates only. Checks: typecheck clean; bun test ./test/ 226 pass 20 skip 0 fail; gate (sh) 17 pass 0 fail; pack dry-run 21 files; dist removed. New tests for the new behavior: sdk-test-writer.
+
+sdk-test-writer: tests added (uncommitted): test/effects.test.ts (validateEffect for notify-user, tool-permission, tool-input deep JSON, validateEffects lists), test/context.test.ts (envelopeVersion, tool absent/present/frozen), test/main.test.ts (onFailure open/closed/invalid before stdin, opaque HookCodec incl. spread/literal/Object.create impostors, generic unknown events, lists through main, ts-expect-error for HOOK_EVENT_UNSUPPORTED and literal HookCodec), test/entry.test.ts + fixtures/entry.ts (onFailure in a real process; stale PreToolUse label fixed), 'Never 2' comments fixed. In-process and real-Bun-pipe tests prove the SDK, not a host. Red shown on scratch src copies: deny-without-reason, duplicate kind, NaN as JSON, no-decision beside others, empty list, closed->1, invalid policy as open, weakened brand check, tool unfrozen/always present: each goes red.
+
+2026-11-26 21:04 Review (getty-bun-reviewer, uncommitted 2b tree on phase-2b-claude-code): local checks green with harness Bun 1.4.5: install --frozen-lockfile (bun.lock unchanged), typecheck, bun test ./test/ 646 pass/49 skip (gate files + Windows-only), gate sh 40/40 (no skip), bootstrap sh 116 pass/20 skip (Windows/real download), render-template --check and --nunjucks, render-pin --check, dash -n, pack --dry-run (dist + README + LICENSE + package.json). No CI run on this diff yet; Windows legs pending. Verdict k31: GO. HookCodec nominal (#private, private ctor), exported as type only; dist/index.d.ts matches README Public API; package.json changed only exports (+./claude-code).
+
+Re-review (getty-bun-reviewer, uncommitted 2b tree): harness Bun 1.4.5: install --frozen-lockfile, typecheck, bun test ./test/ 606 pass/49 skip/0 fail (fewer tests: the dropped unread-key type tables), gate sh 40/40 no skip, bootstrap CI=1 sh 116 pass/20 skip (Windows, real download), render-template --check and --nunjucks, render-pin --check, dash -n, pack --dry-run (getty-agent-bun-runtime-0.1.0.tgz, dist+README+LICENSE+package.json); dist/ removed. CI on this diff not run yet. Verdict k31: GO for commit.
+
+Committed in 6ff253b
