@@ -1,0 +1,27 @@
+---
+class: standard
+completed: 2026-11-26T19:47:40Z
+created: 2026-11-25T08:01:12Z
+id: 11
+priority: medium
+started: 2026-11-25T17:30:09Z
+status: done
+tags:
+- sdk
+- windows
+- phase-2
+title: 'SDK: never Bun.write an empty buffer to stdout (Windows pipe EINVAL)'
+updated: 2026-11-26T19:47:40Z
+---
+
+Executed on windows-latest, Bun 1.4.5 (run 45572032454, commit d822139): `await Bun.write(Bun.stdout, new Uint8Array())` fails with `EINVAL: invalid argument, ftruncate` (fd 1, errno -4071) when stdout is a pipe, which it always is under a hook host and under getty-bun.ps1. Linux does not fail. The scenario fixture now skips the empty write (k8). Phase 2: the SDK writes hook output through one function that skips empty output (no-decision effect) and has a Windows test for it. Upstream report to oven-sh/bun only with the owner's go.
+
+Executed, CI 45579886904 (commit 78a5d2e, windows-latest, Bun 1.4.5), both Windows legs: the slot's bun.exe alone, with stdout a pipe Bun.spawn created, exits 9 with 'EINVAL: invalid argument, ftruncate' on an empty Bun.write to stdout. The same entry through getty-bun.ps1 behaves the same. So it is Bun's own behavior on a Windows pipe, not something the starter causes.
+
+2026-11-25 17:55 Output function: src/output.ts writeOutput; main() writes all hook stdout through it, once. Empty output never reaches the writer (test/output.test.ts unit test; removing the guard fails it). Real-pipe tests: test/output.test.ts ('writeOutput to a real stdout pipe', empty and non-empty) and test/entry.test.ts (no-decision on a stdout pipe, exit 0, no stdout). On Linux they cannot fail for the EINVAL reason (with the guard removed they still pass there), so they prove k11 only once they run on the windows-latest legs: the test suite and CI are pending. Stays in-progress.
+
+Committed in 200f7af (src/output.ts), tests in d976f63, CI control in a40ab45, pushed for CI on phase-2-sdk; fix round 2 and CI pending
+
+CI 45883791115 (40d14da), sdk checks (windows), windows-2025 image, Bun 1.4.5: the negative control 'fails with EINVAL on Windows' ran and passed (raw empty Bun.write to a stdout pipe fails with EINVAL); no-decision through main() writes nothing and exits 0 with no EINVAL on stderr; gate (windows powershell) and gate (windows pwsh): no-decision for SessionStart and SubagentStart through the starter, exit 0, empty stdout, 13/0/0 each.
+
+Merged to main by fast-forward at 0bc8218 (PR 2), CI 45885263188 green; commits 200f7af, d976f63, a40ab45; Windows evidence CI 45883791115 and 45885263188, sdk checks (windows).
