@@ -1,0 +1,31 @@
+---
+claimed_at: 2026-11-26T22:11:35Z
+claimed_by: getty-bun-release-manager
+class: standard
+completed: 2026-11-26T22:11:35Z
+created: 2026-11-26T21:43:04Z
+id: 42
+priority: medium
+started: 2026-11-26T21:44:18Z
+status: done
+tags:
+- docs
+- skills
+- claude-code
+- pre-0.1.0
+title: 'README and getty-bun-integration: onFailure closed only for PreToolUse/UserPromptSubmit-only
+  entries (hub review F4)'
+updated: 2026-11-26T22:11:35Z
+---
+
+Exit 2 also blocks Stop, SubagentStop, PreCompact and ConfigChange in Claude Code; on Stop and SubagentStop Claude keeps working (hooks.md, cite with the date read). "closed" belongs only on entries that serve only PreToolUse or UserPromptSubmit. README.md:344-385 and skills/getty-bun-integration failure policy. An SDK warning is optional and must not change the ADR 0009 interface.
+
+2026-11-26 21:46 Done (uncommitted): exit 2 beyond PreToolUse/UserPromptSubmit documented; rule: onFailure closed only on entries serving nothing but PreToolUse/UserPromptSubmit, others keep open, split entries for guards. Claude Code: hooks.md fetched 2026-11-26T21:44Z, identical to the 20:08Z copy, so existing citations stand; new cites :1030-1071 (Stop :1043, SubagentStop :1044, ConfigChange :1048, PreCompact :1062, Worktree* :1068-1069), :992-994 (onFailure block ignored on Stop/SubagentStop/TaskCompleted/TeammateIdle). Codex 3f65e9f source-checked: Stop/SubagentStop exit 2 + stderr = continuation prompt (stop.rs:330-355, core/src/session/turn.rs:882-899), PermissionRequest denies (permission_request.rs:263-278), compact plain failure (compact.rs:318-325). Files: README.md Exit codes + Codex codec bullets; skills/getty-bun-integration SKILL.md, references/sdk.md, claude-code.md, codex.md, assets/integration-review-template.md; skills/getty-bun/SKILL.md. No SDK code, no BUN_OPTIONS/Changes/bootstrap/test edits. Checks: render-template --check rc 0, render-template.test.ts 28 pass, git diff --check clean.
+
+getty-bun-reviewer 2026-11-26: GO. Claude Code citations checked against .dev/research/claude-code/hooks.md (20:08Z copy): :992-994, :1030, :1043, :1044, :1048, :1062, :1041-1069, :1068-1069 all match; re-fetched hooks.md at 21:51Z, sha256 identical to the copy. Codex 3f65e9f: stop.rs:330-355, core/src/session/turn.rs:882-899, permission_request.rs:263-278, compact.rs:318-325 match (compact exit 2 = plain failure, onFailure block via apply_failure_policy). Rule 'closed only on entries serving nothing but PreToolUse/UserPromptSubmit' stated consistently in README, SKILL.md, sdk.md, claude-code.md, codex.md, review template, getty-bun SKILL.md. No src/ change; ADR 0009 interface unchanged. Low: README.md:407-411 (and claude-code.md) cite :823 only for a plugin's UserPromptSubmit, but :823 also covers Stop, SubagentStop, TaskCompleted (exit 2 with a 'file missing' stderr is non-blocking): now that Stop is discussed, list them. Checks: render-template --check and render-template.test.ts 28/28 pass on HEAD bootstrap plus the k42 docs (scratch export); on the live tree both fail only because k40's bootstrap edits are not yet in the template. git diff --check clean; relative links resolve.
+
+2026-11-26 21:54 Reviewer low finding fixed: the hooks.md:823 exception (exit 2 with a 'file is missing' stderr is non-blocking) now lists Stop, SubagentStop, TaskCompleted and a plugin's UserPromptSubmit. README.md:407-411, skills/getty-bun-integration/references/claude-code.md:110-114. git diff --check clean. Stays in review.
+
+2026-11-26 22:08 getty-bun-reviewer: GO. Low finding fixed: README.md:407-411 and skills/getty-bun-integration/references/claude-code.md:110-114 now list Stop, SubagentStop, TaskCompleted and a plugin's UserPromptSubmit, matching .dev/research/claude-code/hooks.md:823 verbatim in substance. git diff --check clean; render-template --check 0 on the live tree (k40 template included).
+
+2026-11-26 22:11 Committed 0bc542f on pre-0.1.0 (pushed).
