@@ -2,7 +2,8 @@
 
 Status: adapted from the handoff on 2026-11-25. Phase 1 (the bootstrap starters in
 `bootstrap/`) is complete: merged into `main` at `262bc95` (PR 1), gate green in CI run
-45603412444. Phase 2 onward is not implemented yet.
+45603412444. Phase 2 (the SDK core and the Codex codec) is being built on branch
+`phase-2-sdk`; phase 3 onward is not implemented yet.
 Source: [handoff/2026-11-25-bun-runtime-handoff.md](handoff/2026-11-25-bun-runtime-handoff.md).
 Where this plan and the handoff disagree, this plan wins; the deviations are listed below
 and recorded as ADRs in [adr/](adr/).
@@ -156,6 +157,38 @@ code against one definition (the pin block format itself is defined with the ren
 - **Environment.** `GETTY_HOME` that is set but not absolute is an error.
   `GETTY_BUN_LOCK_WAIT` is a whole number of seconds.
 
+## SDK interface (MVP, phase 2)
+
+Decided in phase 2; the API, the error codes and the entry pattern are in
+[README.md](../README.md), "The SDK".
+
+- **Package.** `@getty/agent-bun-runtime`, exports `.` and `./codex`, ESM plus
+  declarations in `dist/`, built by `tsc` (also as `prepack` of `bun pm pack`); no
+  runtime dependencies. `bunfig.toml` makes the `node` of `tsc`'s shebang resolve to Bun,
+  so building needs only the pinned Bun (executed on Linux with no Node on `PATH`; not
+  checked on Windows, where the CI runners have a Node).
+- **`main(options): Promise<number>`** owns the response: it reads stdin, decodes with the
+  codec it is given, runs the handler, validates the effect, encodes, writes stdout once
+  and returns the exit code; it never calls `process.exit`. The entry does
+  `process.exit(await main(...))`. "Process result" in the MVP is this result of `main()`;
+  the subprocess helper of the handoff (section 7.3) waits for a consumer (card `k27`).
+- **Exit codes.** 0 when the effect was encoded and written; 1 for every SDK failure,
+  typed or not, with one stderr line `agent-bun-runtime: <CODE>: <message>` and nothing
+  on stdout. The SDK never returns 2 for its own failures and stays within 0–255; the
+  starters pass the code through unchanged. Codex discards stdout and stderr of a failed
+  start hook (host checks below), so the line is for logs and tests, not for the user.
+- **stdin.** One complete JSON object, at most 1 MiB by default; `main()` stops reading
+  after it and does not wait for the host to close stdin.
+- **stdout.** One function writes the hook output and writes nothing when it is empty
+  (Bun 1.4.5 on Windows fails an empty write to a pipe with `EINVAL`, card `k11`).
+- **Effects.** `no-decision` and `add-context` (audience `model`, placement
+  `session-start-input` or `subagent-input`); the codec rejects what it cannot deliver for
+  the event, it never converts an effect. briefing also writes a user-visible
+  `systemMessage` on Codex; that effect comes with the 3a port (card `k26`).
+- **Pinning before the first release.** `dist/` is not in git, so a consumer that pins a
+  git commit (ADR 0006) gets no build unless its installer builds one; decided before
+  the 3a port (card `k28`).
+
 ## Phases and gates
 
 | Phase | Build | Gate before moving on |
@@ -205,12 +238,37 @@ windows-developer board). The facts below are source-checked in openai/codex `3f
   Measure which shell a real session uses, whether it reads startup files (zsh reads
   `.zshenv` even without a login), what that costs per hook, and what lands on stdout
   ahead of the entry's hook JSON.
-- **stdin.** Codex writes the hook object with `write_all` (`command_runner.rs:318-326`);
-  whether it then closes stdin is not traced. claude-mem (`4dc8e48`, source-checked) reads
-  one complete JSON object because "Codex can keep stdin open". The starter ends once the
-  entry has ended either way (scenario 8b in `bootstrap/test/scenarios.test.ts`, executed
-  on all four scenario legs, CI 45603412444). An entry that reads stdin to its end would
-  wait (derived); the measurement decides whether the SDK may.
+- **stdin.** Codex writes the hook object with `write_all` and drops the stdin handle
+  right after, which closes the pipe for a local hook
+  (`codex-rs/hooks/src/engine/command_runner.rs:318-327`; traced in phase 2, the closing
+  itself is tokio behavior, not read). Codex' own hook tests read stdin to its end
+  (`codex-rs/core/tests/suite/subagent_notifications.rs:221,236`). For a hook in a remote
+  environment the exec server keeps stdin open, and Codex wraps the command so the hook
+  still reaches end of input: under `sh` it pipes the object through `printf '%s'`, under
+  PowerShell through `[Console]::In.ReadLine() | <command>`
+  (`codex-rs/core/src/hook_environment_executor.rs:182-200`). claude-mem (`4dc8e48`,
+  source-checked) reads one complete JSON object because "Codex can keep stdin open". The
+  SDK reads one complete object and does not wait for end of input either way
+  (phase 2, `README.md`); the starter ends once the entry has ended (scenario 8b in
+  `bootstrap/test/scenarios.test.ts`, executed on all four scenario legs, CI 45603412444).
+  Measure that a real hook gets end of input on the local path, and what a PowerShell
+  pipeline into `powershell.exe` does to non-ASCII bytes on the remote path (derived: it
+  re-encodes with `$OutputEncoding`).
+- **Exit codes of start hooks.** For `SessionStart` and `SubagentStart` every non-zero
+  exit, 2 included, fails the hook: "hook exited with code N", stdout and stderr are
+  discarded (`codex-rs/hooks/src/events/session_start.rs:316-330`). The session goes on
+  unless the hook is configured with `onFailure: "block"`, which stops the turn
+  (`codex-rs/hooks/src/events/common.rs:74-90`). So the SDK's stderr line for its own
+  failures (exit 1) is not shown by Codex. Measure how the TUI and `codex exec` report it.
+- **Output.** Exit 0 with empty stdout adds nothing; stdout that parses as the hook JSON
+  is used; stdout that begins with `{` or `[` but does not parse fails the hook; any
+  other text becomes plain context (`session_start.rs:240-313`). Unknown keys reject the
+  whole JSON output (`codex-rs/hooks/src/schema.rs:385-425`). Context above about 2,500
+  approximate tokens is spilled to a file with only a preview in the model context,
+  unless the hook sets `additionalContextLimit: 0`
+  (`codex-rs/hooks/src/output_spill.rs:13,65-92`). Measure the shape the SDK writes, the
+  spill, and what a byte order mark or stray text ahead of the JSON does (derived: it
+  silently becomes plain context).
 - **`commandWindows` shell.** Codex runs `commandWindows` in the session shell, by
   default PowerShell (`pwsh`, else `powershell.exe`) as `-NoProfile -Command <line>`,
   otherwise `cmd /C`; there is no exec form. Measure which shell a real desktop uses and
@@ -225,8 +283,12 @@ skills `codex-plugin-engineering`, `claude-code-plugin-engineering`). Claude Cod
 `hooks/hooks.json`; and Claude Code, which has no `commandWindows`, would run the `sh`
 line on Windows, which fails without Git Bash (not measured for this line). The
 separation must therefore come from the Codex side: `hooks/hooks.json` holds the Claude
-Code hooks, and the Codex hooks live in another file. Whether the Codex manifest can point
-to another hook file is open.
+Code hooks, and the Codex hooks live in another file. The Codex manifest can point to
+another hook file: a `hooks` entry in the manifest (a path, paths, or inline objects)
+replaces the default `hooks/hooks.json` (source-checked, openai/codex `3f65e9f`,
+`codex-rs/core-plugins/src/loader.rs:1178-1235`; which manifest file Codex reads it from
+is not traced). briefing 0.6.0 already names `hooks/codex-hooks.json` in
+`.codex-plugin/plugin.json`.
 
 ## Open decisions (owner)
 

@@ -19,3 +19,9 @@ Revision history for agent-bun-runtime
     URL) and SDK package @getty/agent-bun-runtime, not published yet.
     getty-bun stays the name of the starters, the GETTY_BUN_* variables
     and the store under ~/.getty/runtimes/bun.
+  - SDK @getty/agent-bun-runtime (not published yet): main() reads one
+    hook object from stdin, runs the handler and writes the effect to
+    stdout; failures exit 1 with one stderr line and a typed error code.
+    The package root has the core, ./codex the Codex codec for the
+    SessionStart and SubagentStart hooks with no-decision and add-context
+    effects.

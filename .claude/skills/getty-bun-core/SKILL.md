@@ -59,5 +59,21 @@ dash -n bootstrap/getty-bun.sh
 Run the suite once more with `sh` resolving to `busybox sh`. CI (`.github/workflows/ci.yml`)
 adds `shellcheck`, the `ubuntu-24.04-arm` leg, the Windows legs with
 `GETTY_BUN_TEST_STARTER=powershell` and `pwsh`, the real download
-(`GETTY_BUN_TEST_REAL=1`) and the per-hook cost (`bootstrap/test/measure-hook.ts`). The
-SDK checks (`bun test`) arrive with phase 2.
+(`GETTY_BUN_TEST_REAL=1`) and the per-hook cost (`bootstrap/test/measure-hook.ts`).
+
+SDK (phase 2), from the repository root; the harness Bun alone is enough, neither `bun` nor
+`node` is needed on PATH (`bunfig.toml` runs tsc's `node` shebang on Bun):
+
+```sh
+.dev/harness/bun install --frozen-lockfile
+.dev/harness/bun run typecheck
+.dev/harness/bun test ./test/      # the ./ matters: a bare test/ also runs bootstrap/test
+GETTY_BUN_TEST_GATE=1 GETTY_BUN_TEST_STARTER=sh .dev/harness/bun test ./test/gate/   # gate
+.dev/harness/bun pm pack --dry-run
+```
+
+The gate and the pack leave `dist/` (the prepack build) in the checkout; the gate removes
+only its own `abr-gate-` temp dir. Remove `dist/` afterwards. CI adds the `sdk` job
+(linux-x64 and `windows-latest`; on Windows the JUnit report must show that the
+Windows-only k11 control ran) and the `gate` job (linux-x64 and linux-arm64 with `sh`,
+Windows with `powershell` and `pwsh`).
