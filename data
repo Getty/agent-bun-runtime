@@ -1,0 +1,70 @@
+---
+class: standard
+completed: 2026-11-26T19:47:15Z
+created: 2026-11-25T17:29:35Z
+depends_on:
+- 21
+- 22
+id: 24
+priority: high
+started: 2026-11-26T19:47:15Z
+status: done
+tags:
+- phase-2
+- gate
+- test
+title: 'Phase 2: gate script, packed SDK bundled into a scratch consumer, offline
+  through both starters'
+updated: 2026-11-26T19:47:15Z
+---
+
+Part of k3. Lane: getty-bun-sdk-test-writer (test/gate/). Needs k21 and k22. The phase 2 gate (docs/plan.md): the tarball from bun pm pack, bundled with bun build --target=bun into a scratch consumer, runs offline through both starters.
+
+One command per leg, selected like the bootstrap suite by GETTY_BUN_TEST_STARTER (sh, powershell, pwsh):
+- bun pm pack into a fresh prefixed temp directory; a scratch consumer there depends on the tarball, installs it without network, bundles its entry with bun build --target=bun; then node_modules is removed so only the bundle runs.
+- The consumer carries bootstrap/getty-bun.sh and bootstrap/getty-bun.ps1 from this repository, unchanged; GETTY_HOME is a fresh temp dir; the slot installs from the local fixtures (.dev/fixtures, bootstrap/test/fetch-fixtures.ts) through GETTY_BUN_MIRROR.
+- Offline: after the install the runs point GETTY_BUN_MIRROR at an unreachable address and must not need it.
+- Runs: Codex SessionStart and SubagentStart fixtures with add-context (stdout byte for byte, exit 0), no-decision (empty stdout, exit 0; the k11 case on Windows), invalid input (exit 1, one stderr line), stdin kept open (the run ends).
+Clean up every temp directory; kill only recorded PIDs.
+
+Command contract (coordinator): the gate is test/gate/gate.test.ts (bun:test), skipped with a reason unless GETTY_BUN_TEST_GATE=1, starter from GETTY_BUN_TEST_STARTER (sh, powershell, pwsh), install fixtures from .dev/fixtures (bootstrap/test/fetch-fixtures.ts). CI runs: GETTY_BUN_TEST_GATE=1 bun test ./test/gate/ . Note the ./ : a bare test/ is a substring filter that also runs bootstrap/test.
+
+Gate written: test/gate/gate.test.ts (uncommitted). GETTY_BUN_TEST_GATE=1 GETTY_BUN_TEST_STARTER=sh bun test ./test/gate/: 12 pass 0 fail (~5 s); without the env it is one named skip. Flow: bun pm pack (prepack builds dist) into abr-gate- tmp, consumer with file: tarball, bun install, bun build --target=bun, node_modules/src/tarball removed, unchanged starters copied, slot installed once via local fixture server, then GETTY_BUN_MIRROR=http://127.0.0.1:9 for every run. Asserts: SessionStart/SubagentStart add-context byte for byte vs the .out files (exit 0, empty stderr); no-decision empty stdout exit 0 (k11 on Windows); truncated/empty/not-an-object -> exit 1 one 'agent-bun-runtime: HOOK_INPUT_INVALID' line, session-end -> HOOK_EVENT_UNSUPPORTED, empty stdout; stdin kept open ends in 30 s bound for both process.exit and process.exitCode entry forms; consumer root with spaces and umlauts. Harness imported by computed path (not typed under the strict tsconfig; bootstrap/ untouched). Shown to fail: extra byte in scratch .out -> byte tests fail; ./codex export renamed -> bun build fails in beforeAll; codec LF dropped -> 3 tests fail; stdin reader cancel removed -> only the exitCode form fails (30 s bound), the process.exit form cannot tell. Only Windows/arm64 CI can show: powershell/pwsh legs, bun pm pack/rm -rf prepack on Windows (prepack uses rm -rf: needs bun's shell or Git Bash on Windows, not checked), ps1 stdin/stdout passthrough with a pipe, k11 EINVAL, arm64. Not run: powershell, pwsh (none here). Note: bun pm pack writes dist/ into the checkout (gitignored).
+
+Gate green locally with sh (12 pass); typecheck green; bun test ./test/ skips it. Windows and arm64 legs unverified (CI).
+
+2026-11-26 02:26 review (getty-bun-reviewer): ready locally; the powershell, pwsh and arm64 legs are CI only. GETTY_BUN_TEST_GATE=1 GETTY_BUN_TEST_STARTER=sh bun test ./test/gate/: 12 pass 0 fail with dash, and again with busybox sh (checked that Bun.spawn resolves sh from the env PATH). The guard .github/scripts/assert-tests-ran.ts on real reports: gate off -> 15/15 skipped -> exit 1; missing report -> exit 1; gate on -> exit 0. The consumer install works with an unreachable registry (reviewer scratch run), but the gate does not enforce that (Low: point BUN_CONFIG_REGISTRY at the discard address for the consumer's bun install, so a runtime dependency that creeps in fails the gate). abr-gate- is removed by the file's afterAll; dist/ stays in the checkout (gitignored).
+
+2026-11-26 02:26 windows review (static): go for the first CI run. Paths use node:path; the entry 'bundle/entry.js' is converted by getty-bun.ps1:732; the temp dir abr-gate- goes in afterAll; killTree is PID-only and runs only while the child is alive. On Windows, the exitcode-form test (:229-260) is the one that runs bun.exe on the production pipe kind (the .NET anonymous pipe from the ps1), so it is the most likely Windows red. If it fails, narrow the README:93-97 claim; the documented process.exit form is backed by the analogous scenario 8b. (L) :61-62 imports an absolute Windows path (D:\...) dynamically; Bun's handling of that is not checked. pathToFileURL(HARNESS).href removes the doubt. Only the Windows legs show: the bun pm pack prepack under Bun Shell (rm -rf, the tsc 7 win32-x64 shim with [run] bun = true), the consumer install and bundle, the ps1 passthrough of add-context and no-decision (k11 through the starter's pipe), the one-line failures and the non-ASCII root. Expected: tests=12 skipped=0 failures=0 per leg.
+
+Fix round 1: pathToFileURL for the harness import, large output through the starter, consumer install with BUN_CONFIG_REGISTRY unreachable.
+
+Fix round 1 (gate): harness imported by pathToFileURL(HARNESS).href; bun install runs with BUN_CONFIG_REGISTRY=http://127.0.0.1:9/ (a left-pad runtime dependency in a scratch copy fails the gate with ConnectionRefused); new test: 256 KiB add-context read 1.5 s late through the starter, byte for byte, exit 0 (fails with the writer cut at 64 KiB). GETTY_BUN_TEST_GATE=1 sh: 13 pass 0 fail. dist/ removed afterwards.
+
+Fix round 1 done: gate 13 pass (sh); powershell/pwsh/arm64 unverified.
+
+windows review, fix round 1: L5 fixed (harness imported by pathToFileURL). The large mode is the test that puts bun.exe behind a small pipe on Windows (the starter's .NET pipe, drained by CopyToAsync). Its comment at test/gate/gate.test.ts:269-270 credits the test's own late reader, which Bun drains eagerly (low). Expected per Windows gate leg, counted from the source: tests=13 skipped=0 failures=0, including no-decision for both events, the stdin-open pair in both forms, the large test and the non-ASCII root.
+
+2026-11-26 19:25 review (fix round 1, getty-bun-reviewer): GO for the first commit and the CI push. I checked the guard on a real Linux SDK JUnit report. --allow-skips exits 0. --require-ran 'fails with EINVAL on Windows' exits 1 because that test is skipped on Linux, and an absent name also exits 1. Strict mode exits 1 with 17 of 244 skipped. The required substring matches exactly one testcase. The Windows sdk leg, the arm64 gate leg and shellcheck run only in CI and are not checked yet.
+
+Committed in fa158bc, pushed for CI; fix round 2 and CI pending
+
+Round 2: gate large test reworded (Bun.spawn drains from the start; Windows relevance = bun.exe into the .NET pipe drained by CopyToAsync, getty-bun.ps1:661-664, source-checked, not executed). Added POSIX-only real late reader: sh -c 'starter run entry large | (sleep 1.5; cat)', bounded 60 s, killTree on the sh it started, skipped on win32, bytes compared in full. Both large tests fail with writeStdout not awaited (void Bun.write) in a scratch copy. Gate sh: 14 pass 0 fail. dist/ removed.
+
+Round 2 done: gate 14 pass (sh); Windows/arm64 unverified.
+
+Late-reader gate test now registered only when the starter is sh (if, not skipIf): the CI gate job fails a leg on skipped tests. sh gate 14 pass 0 fail 0 skip. dist/ removed.
+
+windows review, CI 45883791115 and fix round 2: all 13 gate tests passed on both Windows legs (no-decision on both events through the starter, the stdin-open pair in both forms, 256 KiB through the starter, the non-ASCII root; about 0.47 s per hook on powershell, 0.53-0.90 s on pwsh). Round 2: the sh-only slow-reader test is registered only for the sh starter, so Windows stays at 13 tests and Linux goes to 14 (from the source). Nits: gate.test.ts:276-277 still names 'the late read below', which round 2 removed; the 'not executed' at :277 should say the ps1 pipe is source-checked and the test executed through it on both Windows legs (CI 45883791115). Outside the Windows lane: the new test's 'exit 0' is cat's, not the starter's (the pipeline's status), the bytes are its only check.
+
+windows review, correction: the two gate comment nits are at test/gate/gate.test.ts:277-278, not 276-277.
+
+2026-11-26 19:34 review (fix round 2, getty-bun-reviewer): GO for commit, merge after the second CI run. The gate gives 14 pass, 0 skip with dash and with busybox sh; the strict guard exits 0 on both reports. The new late-reader test takes 1.51-1.52 s. It fails with 0 bytes on a non-awaited writer and with 65536 bytes on a writer that waits at most 300 ms; the eager-drain test misses the latter (copies only). Low: test/gate/gate.test.ts:318 says exit 0, but the pipeline status is cat's (line 337), so the entry's code is not checked. Suggest '{ sh "$1" run "$2" large; echo "status $?" >&2; } | (sleep 1.5; cat)' with stderr 'status 0'. Nit: line 277 'the late read below' refers to a sleep this round removed. Neither blocks.
+
+Gate late-reader test now reports the starter's own status ({ starter run; echo status $? >&2; } | (sleep 1.5; cat)) and asserts stderr 'status 0'; fails with status 3 when the entry exits 3 (scratch copy). Comment on the large test fixed (executed on both Windows legs of CI 45883791115; CopyToAsync claim stays source-checked). sh gate 14/0, no skips; typecheck green; dist/ removed.
+
+2026-11-26 19:38 review (round 2 additions, getty-bun-reviewer): GO for the commit of round 2, merge after the second CI run. The Low is fixed: the late-reader test checks the starter's status on stderr. On a copy where the large-mode entry exits 3, it fails ('status 3'). The earlier line-277 nit is fixed. Gate: 14 pass, 0 skip with dash and with busybox sh, strict guard exit 0, late test 1.51 s. New nit: test/gate/gate.test.ts:279-280 'this test passed ... in CI run 45883791115'. That run ran its earlier form, named 'read late through the starter', with a 1.5 s sleep before the read; cite the second run once it is green.
+
+Round 2 committed in 0bc8218, second CI run pending
+
+Merged to main by fast-forward at 0bc8218 (PR 2), CI 45885263188 green; commits fa158bc, 0bc8218.
