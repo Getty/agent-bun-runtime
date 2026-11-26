@@ -73,8 +73,9 @@ publish gate.
 3. Publish by hand, logged in as an owner of the npm org `getty`. In a clean checkout of
    the tag (`git checkout v0.1.0`), with the pinned Bun (1.4.5), run `bun install
    --frozen-lockfile` and `bun pm pack` again, check it with `tar tzf`, and publish exactly
-   that tarball: `npm publish --access public getty-agent-bun-runtime-0.1.0.tgz`. Never the tarball from "Before the tag",
-   step 3: it predates the stamp commit. The package is public, Artistic-2.0.
+   that tarball: `npm publish --access public getty-agent-bun-runtime-0.1.0.tgz`. Never
+   the tarball from "Before the tag", step 3: it predates the stamp commit. The package is
+   public, Artistic-2.0.
 4. Check: `npm view @getty/agent-bun-runtime@0.1.0 dist.tarball`, install it into a
    scratch consumer, bundle and run one hook through a starter.
 5. Optional: a GitHub release for `v0.1.0` with the `Changes` entry.
