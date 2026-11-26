@@ -1,0 +1,60 @@
+---
+class: standard
+completed: 2026-11-26T19:47:03Z
+created: 2026-11-25T17:29:31Z
+depends_on:
+- 21
+id: 23
+priority: high
+started: 2026-11-26T19:47:03Z
+status: done
+tags:
+- phase-2
+- sdk
+- test
+title: 'Phase 2: SDK tests for core, Codex codec, stdin and empty output'
+updated: 2026-11-26T19:47:03Z
+---
+
+Part of k3. Lane: getty-bun-sdk-test-writer (test/). Needs k21; the codec part needs k22.
+
+bun:test suites for the core and the Codex codec:
+- main() exit codes: 0 on success, 1 on every SDK failure with one stderr line and empty stdout, never 2.
+- stdin: one complete JSON object without EOF. A spawned entry whose stdin the test keeps open must end in bounded time once the object is written; incomplete, empty, oversized and non-object input fail typed.
+- Output (k11): no-decision writes nothing; a spawned entry with stdout on a pipe exits 0 with empty stdout and no EINVAL. This test must run on the Windows CI legs.
+- Codex codec against the source-checked fixtures of k22: decode and encode per event, unsupported effect or placement fails explicitly.
+A mocked stdin/stdout test proves the codec, not the host: say so. Temporary directories carry a prefix and are removed in the file's own afterEach/afterAll; kill only PIDs the test started.
+
+Core part of the tests done (uncommitted): test/entry.test.ts (spawned Bun entry, stdin open: bytes after object, chunk splits in string/escape/UTF-8/byte-per-chunk, whitespace, BOM, empty/incomplete/non-object/malformed/non-UTF-8/oversized -> HOOK_INPUT_INVALID, 10 SDK failures in a real process: exit 1, one stderr line, empty stdout), test/main.test.ts (12-case never-2 table, OUTPUT_FAILED sync throw), test/output.test.ts (k11 Windows-only negative control, skipped elsewhere), fixtures entry.ts extended + raw-empty-write.ts. typecheck green; bun test ./test/ 110 pass 1 skip 0 fail. Mutations in a scratch copy fail the intended tests (guard, no cancel, read to EOF, no escape handling, exit 2, BOM skip, no max). No src bug found. k11 only provable on Windows CI. Codec part pending.
+
+Codec part: test/codex.test.ts (codex worker, 100 tests) already covers decode/encode per event, unsupported effect/placement, main() and the entry with stdin closed. Added only test/codex-process.test.ts (9 tests, real Bun child): the Codex entry with stdin held open (both events, no-decision) and every malformed/ fixture through main() with its README code (exit 1, empty stdout, one stderr line). Mocked-stdio parts prove the codec, not Codex; no host run (phase 3a). bun test ./test/: 221 pass, 16 skip (gate + Windows control), 0 fail; typecheck green.
+
+Tests for the SDK core (entry/main/output k11) and the Codex codec part are written and green locally; Windows-only evidence listed in the notes. See notes above.
+
+2026-11-26 02:26 windows review (static): go for the first CI run. (M) test/entry.test.ts:46 defaults to the process.exitCode form, so the k11 test (:112-117) and every stdin parsing test (:124-211) depend on the reader cancel ending Bun on Windows. That is not checked there. If it does not hold, about 20 tests fail at 10 s each, and k11 fails for the wrong reason. Suggest 'exit' (the documented pattern) as the default, keeping exitcode in the dedicated pair :103-107. (L) test/codex.test.ts:415-444 run under bun test's 5 s default while EXIT_BOUND_MS is 10 s (:18), so the bound and the kill at :408-411 never fire. The process tests in test/output.test.ts:50-64 and :82-101 have neither a bound nor a kill. (L) output.test.ts:70 and entry.test.ts:111 'exits 9': 9 is the phase 1 fixture's own code; raw-empty-write.ts has no catch. Paths use node:path, children come from process.execPath, temp dirs carry prefixes and go in each file's afterAll, and kills are PID-only: fine. Expected on the Windows sdk legs: 222 pass, 15 skip (the gate only), 0 fail; the k11 negative control must pass, not skip.
+
+2026-11-26 02:26 review (getty-bun-reviewer): ready. Hygiene: each file removes its abr-sdk-test-/abr-codex-test- dir in its own afterAll; kills only by recorded handle; children get a temporary HOME and GETTY_HOME. Mutations in a scratch copy: stdin reader left locked -> 17 entry/codex-process tests fail (intended); writeOutput swallowing writer errors -> 'a failing writer rejects' fails, so the un-awaited expect(...).rejects at test/output.test.ts:29 still bites under Bun 1.4.5 (nit: await it anyway). k11 can only be proven on windows-latest. Gap (Low): no test sends output larger than a pipe buffer through process.exit; the reviewer ran it on Linux up to 4 MB with a late reader (intact), Windows not checked.
+
+Fix round 1: entry.test default exit form, BOM now accepted, 256 KiB late-reader output test, bounds for process tests, exit-9 comments, await rejects.
+
+Fix round 1 (tests): BOM cases (one leading BOM accepted incl. split across chunks; second BOM and BOM after whitespace -> HOOK_INPUT_INVALID) in entry.test.ts and input.test.ts; hostParentSessionId dropped from context.test.ts; entry.test.ts default form is process.exit (exitCode only in the dedicated pair); 256 KiB add-context read 1.5 s late (entry.test.ts); per-test timeouts above the bounds in codex.test.ts and output.test.ts, bounded PID-only kill in output.test.ts; 'exit 9' comments fixed, rejects awaited. typecheck green; bun test ./test/: 224 pass 17 skip 3 fail - the 3 are the one-BOM-accepted tests (entry x2, input x1), red only because src/input.ts does not skip a BOM yet (sdk-worker). Large-output test fails when the writer drops bytes after 64 KiB (received 60496 chars, expected 262152).
+
+Fix round 1 tests done; 3 BOM-accepted tests stay red until src/input.ts skips one leading BOM (sdk-worker), recheck then.
+
+windows review, fix round 1: M2 fixed (runEntry defaults to process.exit; the k11 test uses it; exitCode only in its pair). L6 fixed (process tests in codex.test.ts and output.test.ts have timeouts above the 10 s bound and kill only their own child). New, low: test/entry.test.ts:254-256 says the child blocks on a full pipe until the late reader starts; Bun.spawn drains eagerly (executed on Linux), so the test shows completeness only. Linux, Bun 1.4.5, executed: tests=244 pass=227 skip=17 fail=0. Expected on sdk checks (windows): tests=244 skipped=16 failures=0, the k11 control ran and passed.
+
+2026-11-26 19:24 review (fix round 1, getty-bun-reviewer): GO for the first commit and the CI push. Checked tests fail when the logic changes. A locked, uncancelled stdin reader gives 8 failures, among them the dedicated exitcode test, now that the default form is exit. A non-awaited writeStdout fails the 256 KiB entry test. Open before main: the comments at test/entry.test.ts:254-256 and test/gate/gate.test.ts:269-270 claim a full-pipe block that Bun.spawn's eager drain prevents (windows reviewer M3). Reword them to large output, byte for byte, exit 0, or make the POSIX reader really late with a shell pipeline. The 4 KiB Windows pipe buffer figure has no evidence label.
+
+Committed in d976f63, pushed for CI; fix round 2 and CI pending
+
+Round 2 wording: entry.test.ts large-output test no longer claims a late reader or blocking pipe (lateReadMs removed, Windows buffer number dropped, 'not checked'); it is a plain 256 KiB byte-for-byte exit 0 test, still fails with a non-awaiting writeStdout (scratch copy). typecheck green; bun test ./test/ 227 pass 18 skip 0 fail.
+
+Round 2 wording done; checks green.
+
+windows review, CI 45883791115 on sdk checks (windows): passed there, among the rest: the k11 control 'fails with EINVAL on Windows' (13.90 ms), no-decision on a stdout pipe with no EINVAL on stderr, 'process.exitCode = await main() ends the process' and 'process.exit(await main()) ends the process' with stdin left open, the four BOM tests, 256 KiB output (1505 ms with the old late read), empty and non-empty writeOutput to a real pipe. Round 2 relabel of the large test (entry.test.ts:248-254) is accurate; the count stays 244/16 skipped on Windows. README.md:94-97 can now cite this run for Windows instead of 'Windows not checked yet'.
+
+2026-11-26 19:34 review (fix round 2, getty-bun-reviewer): GO. test/entry.test.ts large-output test: the comment now states what it checks, and lateReadMs and the 4 KiB figure are gone. It still catches a non-awaited writeStdout (round 1 mutation). bun test ./test/: 227 pass, 17 skip, 0 fail; typecheck 0.
+
+Round 2 committed in 0bc8218, second CI run pending
+
+Merged to main by fast-forward at 0bc8218 (PR 2), CI 45885263188 green; commits d976f63, 0bc8218.
