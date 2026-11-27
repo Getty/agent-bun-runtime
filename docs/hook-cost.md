@@ -78,6 +78,17 @@ of runs 2 and 3):
 - nothing timed out;
 - stdout was byte-identical to the direct form.
 
+### macOS (0.2.0)
+
+The hub review of 0.2.0 (agent-developer, 2026-11-27) read the per-hook cost of the
+`macos-15-intel` leg (`darwin-x64`) of CI run 46040193580 at `30401e0`: about 17 ms for the
+starter over Bun. Suspected cause, not measured: on x86_64 macOS `getty-bun.sh` forks
+`/usr/sbin/sysctl` on every call to detect a Rosetta shell; native Apple silicon
+(`macos-15`) never runs it. Avoiding the fork with the Linux slot-first rule (take an
+existing `darwin-aarch64`, then `darwin-x64` slot, call `sysctl` only when neither exists)
+is card `k71`; it needs a new measurement on `macos-15-intel` to show whether `sysctl` is
+the cost.
+
 ## Reading
 
 - **Linux:** the starter costs about 5–6 ms over Bun alone: a `receipt.json` read and a few

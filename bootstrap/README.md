@@ -140,7 +140,7 @@ d=.dev/release/bun-v$v
 mkdir -p .dev/release && mkdir "$d"       # fails if it exists: must be new and empty
 base=https://github.com/oven-sh/bun/releases/download/bun-v$v
 curl -fsSL --proto '=https' -o "$d/SHASUMS256.txt.asc" "$base/SHASUMS256.txt.asc"
-for t in linux-x64 linux-x64-baseline linux-aarch64 darwin-x64 darwin-aarch64 windows-x64 windows-x64-baseline; do
+for t in linux-x64 linux-x64-baseline linux-aarch64 darwin-x64 darwin-x64-baseline darwin-aarch64 windows-x64 windows-x64-baseline; do
   curl -fsSL --proto '=https' -o "$d/bun-$t.zip" "$base/bun-$t.zip"
 done
 
@@ -150,10 +150,17 @@ sed -n '/^-----BEGIN PGP PUBLIC KEY BLOCK-----$/,/^-----END PGP PUBLIC KEY BLOCK
 gpg --batch --assert-signer F3DCC08A8572C0749B3E18888EAB4D40A7B22B59 \
   --verify --output "$d.verified.txt" "$d/SHASUMS256.txt.asc"   # must exit 0
 
-(cd "$d" && grep -E '  bun-(linux-x64|linux-x64-baseline|linux-aarch64|darwin-x64|darwin-aarch64|windows-x64|windows-x64-baseline)\.zip$' \
-  "../bun-v$v.verified.txt" | sha256sum -c -)                  # seven OK
-for t in linux-x64 linux-x64-baseline linux-aarch64 darwin-x64 darwin-aarch64 windows-x64 windows-x64-baseline; do
+(cd "$d" && grep -E '  bun-(linux-x64|linux-x64-baseline|linux-aarch64|darwin-x64|darwin-x64-baseline|darwin-aarch64|windows-x64|windows-x64-baseline)\.zip$' \
+  "../bun-v$v.verified.txt" | sha256sum -c -)                  # eight OK
+for t in linux-x64 linux-x64-baseline linux-aarch64 darwin-x64 darwin-x64-baseline darwin-aarch64 windows-x64 windows-x64-baseline; do
   unzip -Z1 "$d/bun-$t.zip"                                     # the member and its directory
+done
+for os in linux darwin windows; do                              # x64 against baseline, per OS
+  m=bun; if [ "$os" = windows ]; then m=bun.exe; fi
+  unzip -p "$d/bun-$os-x64.zip" "bun-$os-x64/$m" >"$d/x64.bin"
+  unzip -p "$d/bun-$os-x64-baseline.zip" "bun-$os-x64-baseline/$m" >"$d/baseline.bin"
+  cmp "$d/x64.bin" "$d/baseline.bin" && echo "$os: x64 and baseline identical"
+  rm -f "$d/x64.bin" "$d/baseline.bin"
 done
 gpgconf --kill all; rm -rf "$GNUPGHOME"; unset GNUPGHOME
 ```
@@ -165,6 +172,12 @@ gpgconf --kill all; rm -rf "$GNUPGHOME"; unset GNUPGHOME
   throwaway home. `--assert-signer` with the full fingerprint is the check; a good
   signature from any other key fails it.
 - A bad signature, a fingerprint mismatch or a checksum mismatch stops the addition.
+- The `cmp` loop decides how much the slot-first choice on x64 may cost (below, "POSIX
+  starter: targets" and "Windows starter"): a CPU without AVX2 runs an existing
+  `linux-x64` or `windows-x64` slot. While x64 and baseline are byte-identical, as in
+  1.4.5, that is harmless; once `cmp` reports a difference for an OS, say so in the
+  commit and in the targets section. `darwin-x64-baseline` is downloaded only for this
+  comparison; it is no target.
 - Add the entry to `versions.json`, extend the verified-versions table above, render the
   starters for the new version and run the scenario suite against them. Regenerate the
   template with `render-template.ts`: it embeds every version of the table. The commit names
@@ -537,7 +550,8 @@ ran the entry unchanged.)
 `getty-bun.sh` runs under any POSIX `sh` (tested with `dash` and `busybox sh`) on Linux
 and macOS. The fast path uses only shell builtins and `uname`, plus `sed` on Linux x64
 while neither x64 slot exists and `/usr/sbin/sysctl` on an x64 macOS (below, "POSIX
-starter: targets"). An install also needs, on `PATH`:
+starter: targets"); `run-mcp` adds `sleep` while it waits and `awk` for its stub
+(below, "`run-mcp`"). An install also needs, on `PATH`:
 
 | Tool | Requirement |
 |---|---|
@@ -568,6 +582,16 @@ and that detected target. macOS (`Darwin`): `arm64` -> `darwin-aarch64`; `x86_64
 `darwin-x64`, unless `/usr/sbin/sysctl -n sysctl.proc_translated` prints `1` (a shell
 under Rosetta 2 on Apple silicon), which selects `darwin-aarch64`, the binary Bun's own
 installer picks there too. Any other system or machine is unsupported (exit 1).
+
+**Limit: slot first on a CPU without AVX2.** The fast path never reads the CPU while a
+slot exists, so a `linux-x64` slot is taken on a CPU without AVX2 too: a `GETTY_HOME`
+shared between machines (a network or synced home), copied from another machine, or
+installed while a hypervisor showed AVX2. The same holds for `windows-x64` on Windows
+("Windows starter"). In Bun 1.4.5 the `bun` of `linux-x64` and `linux-x64-baseline` is
+byte-identical (`cmp`, above under "macOS"), so for this pin both slots run the same
+binary and nothing is lost; a later pin whose x64 build needs AVX2 would die there with
+an illegal instruction instead of falling back. "Adding a version" compares the two
+members per OS for that reason.
 
 Cost on Linux, linux-x64 host with AVX2 (Xeon E5-2680 v4, `dash`, Bun 1.4.5), measured
 2026-11-27, N = 20 interleaved, wall clock per call:
@@ -623,6 +647,75 @@ record has `processStartToken` and `environmentId` `null` there.
 `getty-bun: Bun <version> <target> is not installed yet (<slot>); run-ready skipped <entry>`;
 no lock, no staging, no download. `mismatch`, an invalid environment or an unsupported
 target: as `run`, exit 1.
+
+**`run-mcp <entry> [args...]`.** The starter mode for a long-lived stdio (MCP) server,
+the line a plugin's MCP server declaration runs; `docs/plan.md`, "Rework after the hub
+review", is the spec. Why: Claude Code 2.1.332 blocks an MCP server for about 15 minutes
+when it ends before `initialize` completes, by a timeout or by a quick exit, 0 or 1 alike,
+and it starts the server in parallel to `SessionStart` (hub probe of 2026-11-27, executed
+there, Linux x64; not repeated here).
+
+- Slot `ready` and `<root>/<entry>` a readable regular file: exactly `run`, the same
+  `exec`, PID, flags and environment.
+- Slot `missing`: no install of its own (no lock, staging or download). It polls the
+  slot state about every 0.25 s for at most `GETTY_BUN_MCP_WAIT` seconds (a whole number,
+  default 20, below the 30 s both hosts allow a server to start; leading zeros are
+  dropped, more than six digits count as 999999) while a `SessionStart` `ensure` installs;
+  `ready` within that time: `exec` as above.
+- Every other way (still `missing` after the wait, `mismatch`, an invalid `GETTY_HOME`,
+  `GETTY_BUN_LOCK_WAIT` or `GETTY_BUN_MCP_WAIT`, a missing or broken pin, an unsupported
+  or undeclared platform, a missing entry argument, and with the slot `ready`, after the
+  wait too, a `<root>/<entry>` that is no readable regular file, on which Bun would exit 1
+  before `initialize`): one `getty-bun: ` line with the reason on stderr, then the
+  starter becomes a **stub server**. In this mode every
+  failure that would exit 1 elsewhere becomes the stub; the starter's own failure lines
+  are the reasons. Under Git Bash, MSYS and Cygwin the starter still forwards to
+  `getty-bun.ps1`, which ends `run-mcp` with one line and exit 1 (`k13`); only a failure
+  of the forwarding itself (no `getty-bun.ps1`, no `cygpath`, no PowerShell) becomes the
+  stub there.
+
+The stub is POSIX `awk`, started by `exec`, so the host's PID answers; `LC_ALL=C`, and
+mawk gets `-W interactive`, without which it reads a pipe in blocks and answers nothing
+before end of input. On stdout only JSON-RPC, one message per line, each flushed:
+
+| Message | Answer |
+|---|---|
+| `initialize` | `protocolVersion` as the client sent it in `params` (`2025-06-18` when it sent none), `capabilities` `{"tools":{}}`, `serverInfo` `{"name":"getty-bun-stub","version":"<pin version, or unknown>"}`, `instructions`: the reason and that the real server is there from the next session |
+| `tools/list` | `{"tools":[]}` |
+| `tools/call` | `{"content":[]}` (an `mcp_tool` hook then sees no error) |
+| `ping` | `{}` |
+| any other method with an `id`, `server/discover` included | error `-32601` |
+| a notification (no `id`) | nothing |
+| a line that is no single JSON object, an `id` that is neither string nor number, a message without `method` (a response) | nothing |
+
+Only the top-level `id` and `method` count: the scan follows depth and strings, so an
+`"id"` or `"method"` inside `params`, in any key order and with escaped quotes in the
+strings around it, never does. The `id` goes back verbatim, number or string (Claude
+Code first sends `server/discover` with `"server-discover-probe-1"`). End of input: exit
+0. A signal (HUP, INT, TERM): the stub ends by that signal; during the wait the starter
+exits 129, 130 or 143 after at most one 0.25 s poll. The first signal counts, with one
+limit: two different signals arriving at the same instant may be handled in signal-number
+order, so the exit code is the lower one's (HUP before INT before TERM); with Claude Code's
+sequence, INT and TERM about 0.1 s later, the first wins. A
+signal the host had set to ignored before the start stays ignored (POSIX: a
+non-interactive shell cannot trap it).
+
+Limit: the stub scans each line character by character, so a very long line is slow in
+BusyBox `awk`, and likely in the one-true-awk of BSD and macOS: a 10 KB line took 0.016 s,
+a 300 KB line 2.8 s in BusyBox 1.37; mawk took 0.57 s for a 4 MB line (reviewer-measured,
+Linux x64, 2026-11-27; the one-true-awk not checked). The stub's traffic is a few hundred
+bytes per message, so this matters only for a client that sends it large requests.
+
+Evidence: executed 2026-11-27 on Linux x64 with `dash`, `bash`, BusyBox 1.37 `sh` (whose
+`exec awk` runs its own awk applet in the same process, so the stub resets the traps
+first) and `zsh` as `sh`, with mawk 1.3.4 and BusyBox `awk`: the scenario rows of
+`bootstrap/test/run-mcp.test.ts` (sh leg) and transcripts of `server/discover`,
+`initialize`, `notifications/initialized`, `tools/list`, `tools/call` with `"id"` and
+`"method"` inside the arguments in both key orders, `ping`, an unknown method, garbage
+and end of input; TERM, INT and HUP in the stub ended it within 2 ms (exit 143, 130,
+129 by the signal), during the wait within about 0.2 s. Not checked: the one-true-awk of
+macOS (it reads through stdio, which returns what a pipe holds, as gawk does; neither
+ran here), gawk, and a real host against the stub (the hub's probe used its own sh stub).
 
 **Download.** Under the install lock the archive downloads to
 `<GETTY_HOME>/runtimes/bun/.downloads/<version>/<target>/<archive>.part`, resumed when
@@ -764,6 +857,15 @@ lock; a ready slot runs as `run` with the same streams, exit code and arguments;
 `PROCESSOR_ARCHITECTURE` and a missing entry fail with exit 1 and one line. The line
 names `windows-x64` there because the runner's CPU has AVX2; a CPU without it: not
 checked.)
+
+**`run-mcp`: not on Windows.** `getty-bun.ps1` knows the command and fails with one
+`getty-bun: ` line naming `k13` and exit 1, with or without an entry, before it reads the
+environment or the pin: no lock, staging, download or `GETTY_HOME`. MCP servers through
+the PowerShell starter, the Git Bash forwarding (which hands `run-mcp` to it unchanged)
+included, belong to `k13`. The usage line names the command with "(not on Windows)".
+(Executed on Linux with pwsh 7.7 only: the line and exit 1 for `run-mcp`, `run-mcp
+server.js` and `run-mcp server.js -x`, no `GETTY_HOME` afterwards. On Windows: not
+checked until the scenario suite's test for it runs in CI.)
 
 **Download and resume.** Under the install lock the archive downloads to
 `<GETTY_HOME>\runtimes\bun\.downloads\<version>\<target>\<archive>.part`, in process
@@ -1091,7 +1193,13 @@ starts with `. ` and the word after the dot names `getty-bun.cmd` (`getty-bun.cm
 path ending in `/` or `\` and `getty-bun.cmd`; the word is a double- or single-quoted
 string, optionally followed by unquoted text, or an unquoted word, then a blank or the end
 of the line), runs that same line again under `bash` by `exec`: the dot then passes the
-arguments and `BASH_SOURCE` names the file. Never from bash or zsh, so it cannot loop.
+arguments and `BASH_SOURCE` names the file. Never from bash or zsh, and only once: it
+exports `GETTY_BUN_POLYGLOT_REEXEC=1` before the `exec`, and when that is already set
+where it would re-run the line (a `bash` on `PATH` that is dash, or anything else that
+drops the arguments too), it fails with one `getty-bun: ` line and exit 1 instead of
+re-running the line forever. The polyglot removes the marker before `getty-bun.sh`
+starts, so neither the starter nor the entry sees it; a hook environment that already
+carries it makes dash fail the same way.
 Whatever ran in dash before the polyglot would run a second time under bash, so the first
 word is the gate: a line such as `. ./side.sh; . "<root>/bootstrap/getty-bun.cmd" run
 e.js` fails, after `side.sh` has run once. Without `/proc`, `bash` or `xargs`, or with
@@ -1120,7 +1228,11 @@ CI: dash re-ran `. "<root>/..."`, `. '<root>/...'`, `. "$VAR/bootstrap/getty-bun
 `. "$VAR"/bootstrap/getty-bun.cmd` with their arguments; `. ./side.sh; . "<root>/..." run
 e.js` and `. "<root>/bootstrap/getty-bun.cmd";. ./side.sh run e.js` failed with the one
 line and exit 1, `side.sh` having run once in the first; bash, zsh 5.9 and BusyBox sh with
-`CLAUDE_PLUGIN_ROOT` ran unchanged.)
+`CLAUDE_PLUGIN_ROOT` ran unchanged. The re-run guard, the same kind of local run with dash
+0.5.12 and bash 5.2.37: with a `bash` on `PATH` that is a link to dash, the line failed
+with the one line and exit 1, where without the guard it never ended (exit 124 under
+`timeout 3`); with the real bash, dash re-ran the line and a stub `getty-bun.sh` got the
+arguments without `GETTY_BUN_POLYGLOT_REEXEC`, as it did under bash and zsh 5.9.)
 
 **Batch side.** `cmd.exe` skips the first line (a label to it), and runs
 
@@ -1168,3 +1280,25 @@ none of it checked on Windows:
   double quotes, looks for a polyglot that does not exist, writes its error on stderr and,
   with `$LASTEXITCODE` unset, the line exits 0: the hook fails open. (Derived from
   PowerShell's double-quoted string rules; not checked.)
+
+**Limits of the POSIX side.** Where the line fails before the polyglot runs, the exit code
+is the shell's, not the starter's, and some shells give 2, which Claude Code reads as a
+blocking error (documented, hooks reference): the hook then blocks every call it serves.
+
+- *Missing polyglot.* A `getty-bun.cmd` that is not at the line's path (a plugin root
+  that does not hold it): dash 0.5.12 and BusyBox sh 1.37.0 end with 2, bash 5.2.37 (also
+  `--posix`) with 1, zsh 5.9 with 127, each after its own message on stderr. Not new in
+  0.2.0: `sh <missing getty-bun.sh>` gave 2 in dash for a 0.1.0 hook line as well. From
+  PowerShell the same case exits 0 (above, `; exit $LASTEXITCODE`).
+- *CRLF line endings.* A polyglot checked out with CRLF (Git for Windows with
+  `core.autocrlf=true` and no attribute) is a syntax error for the shell: dash, bash and
+  BusyBox sh end with 2, zsh with 126, before the starter runs. So the consumer's
+  `.gitattributes` must give the `.cmd` `eol=lf` (`* text=auto eol=lf`, or at least
+  `bootstrap/getty-bun.cmd text eol=lf`); this is mandatory, not hygiene. `cmd.exe` runs
+  either form (derived: the LF batch side executed, above; a CRLF one not checked).
+- *`run-mcp`.* The polyglot passes `run-mcp` through like any command; on Windows it ends
+  in `getty-bun.ps1`, which does not support it (above, Windows starter, `run-mcp`; `k13`).
+
+(Both cases executed locally outside the suite, Linux, with the shells named and the line
+`. "<root>/bootstrap/getty-bun.cmd" <command>; exit $LASTEXITCODE` under `<sh> -c`; the
+CRLF copy made with `sed 's/$/\r/'`. Git Bash on Windows: not checked; its bash is bash.)

@@ -15,9 +15,10 @@ bootstrap/getty-bun.cmd   polyglot for Claude Code hooks in shell form (no pin; 
 ```
 
 Each starter carries one pin block: the Bun version and the SHA256 per target, from the version
-table of the agent-bun-runtime release this skill came from. skilletor renders only into
-this skill's own directory, so the plugin gets the starters by copy, and its CI checks the
-copy. Using the runtime afterwards (status, troubleshooting): skill `getty-bun`. Building
+table of the agent-bun-runtime release this skill came from. skilletor renders the skill
+either into the harness's skills directory (`.claude/skills/getty-bun-install/`) or, with
+`"into": "plugin"`, into the plugin's own `skills/getty-bun-install/` (section 1); either
+way the plugin gets the starters into `bootstrap/` by copy, and its CI checks the copy. Using the runtime afterwards (status, troubleshooting): skill `getty-bun`. Building
 the entry on `@getty/agent-bun-runtime`: skill `getty-bun-integration`.
 
 ## 1. Pin the version
@@ -50,9 +51,29 @@ In the plugin's `.claude/skilletor.json` (project scope):
   `linux`, `darwin`, `windows`, in the same order as `gettyBun.platforms` in
   `package.json`. It renders one `# platforms` line into the pin block; on a platform it
   does not list, `run`, `run-ready` and `ensure` exit 0 with one `getty-bun: ` line and
-  install nothing, and `status` says `undeclared`. Without it, the block has no such line
+  install nothing (`run-mcp` serves its stub), and `status` says `undeclared`. Without it, the block has no such line
   and every platform is served. Any other value fails the render with
   `Unable to call vars_bun_platforms_must_be_a_list_of_unique_linux_darwin_windows`.
+
+**Into the plugin** (skilletor card `k286`, on its `main` from 2026-11-27, not in a
+skilletor release yet): instead of the string, name the install as
+
+```json
+"install": { "skills": [ { "skill": "getty-bun-install@agent-bun-runtime", "into": "plugin" } ] }
+```
+
+skilletor then renders the skill once, with the project's vars, into the plugin's own
+skills directory (`skills/getty-bun-install/`, or under the `skills` path of
+`.claude-plugin/plugin.json`), whatever the `targets`, and not into `.claude/skills`. The
+plugin commits that copy; skilletor's lock owns it as `plugin:skills/getty-bun-install`,
+so `sync` updates it and `check` reports drift, and on a fresh checkout files equal to the
+render are adopted. Project scope only, skills only; a project without
+`.claude-plugin/plugin.json` is a config error. The skill then also ships to the plugin's
+users as one of its skills. Section 2 copies from `skills/getty-bun-install/bootstrap/`
+instead, and section 4 compares against that path. (Documented by skilletor, README,
+"Shipping a rendered skill in your plugin", and `skills/skilletor/references/sync.md`;
+skilletor ships its own `skills/getty-bun-install/` that way. Not executed by
+agent-bun-runtime.)
 
 Then `skilletor trust agent-bun-runtime` (a project-declared source renders nothing until
 trusted) and `skilletor sync --scope project`. A failed render is a `warning: template
@@ -63,6 +84,7 @@ keeps the copy rendered before (executed, see the end of section 4). Read the sy
 
 ```sh
 skill=.claude/skills/getty-bun-install    # the rendered copy (Claude target; others alike)
+# with "into": "plugin": skill=skills/getty-bun-install
 mkdir -p bootstrap
 cp -p "$skill/bootstrap/getty-bun.sh" "$skill/bootstrap/getty-bun.ps1" "$skill/bootstrap/getty-bun.cmd" bootstrap/
 ```
@@ -184,6 +206,51 @@ that has finished:
 The `sh` and Codex lines take `run-ready` in place of `run` alike. On Windows a polyglot
 hook pays one more PowerShell start (above); measure it against such a budget.
 
+**Offline without a slot.** A hook that installs (`run`, `ensure`) and cannot download
+ends with exit 1 and one `getty-bun: ` line before the entry runs; `run-ready` stays at
+exit 0 while the slot is missing, and the SDK's `onFailure: "silent"` does not apply,
+because the entry never started. Codex discards a failed start hook's output, so on
+`SessionStart` that line is lost without a trace (run the hook line by hand to see it);
+Claude Code shows it. The next hook tries again; a `ready` slot needs no network.
+
+**MCP server: `run-mcp`.** A stdio server (MCP) runs through `run-mcp`, never `run` or
+`run-ready`: Claude Code blocks a server for about 15 minutes when it ends before
+`initialize`, by its 30 s start timeout or a quick exit alike, and starts it in parallel
+to `SessionStart`. `run-mcp` execs the entry when the slot is ready, waits up to
+`GETTY_BUN_MCP_WAIT` seconds (default 20) for a missing one, and otherwise serves a stub
+without tools until the session ends; it never installs. The server line, with the host
+word as its argument (Claude Code `.mcp.json`, Linux and macOS):
+
+```json
+{ "mcpServers": { "example": { "command": "sh",
+  "args": ["${CLAUDE_PLUGIN_ROOT}/bootstrap/getty-bun.sh", "run-mcp", "dist/server.js", "claude-code"] } } }
+```
+
+and the install beside it, a `SessionStart` hook `ensure` with timeout 600:
+
+```json
+{ "type": "command",
+  "command": "sh \"${CLAUDE_PLUGIN_ROOT}/bootstrap/getty-bun.sh\" ensure",
+  "timeout": 600 }
+```
+
+- The first session has the real server only if that install finishes within the wait;
+  otherwise it has the stub (no tools, its `instructions` say why) and the next session
+  starts the real one.
+- Codex: the server declaration finds the starter through a locator and names
+  `"env_vars": ["GETTY_HOME", "GETTY_BUN_MIRROR"]`, without which the server looks for Bun
+  under `~/.getty` while the hook installs into `$GETTY_HOME` (skill
+  `getty-bun-integration`, [codex.md](../getty-bun-integration/references/codex.md)).
+- The entry answers `initialize` before anything that can fail, and keeps the lifetime,
+  signal and exit rules of [contract.md](../getty-bun-integration/references/contract.md),
+  "Long-lived stdio server".
+- Not on Windows in 0.2.0: `getty-bun.ps1 run-mcp` fails with one line, exit 1 (`k13`).
+
+`run-mcp` is executed locally in agent-bun-runtime (`bootstrap/test/run-mcp.test.ts`, Linux
+`sh`), not yet under a host; the host facts are hub-observed (agent-developer and agent-irc
+K9, 2026-11-27, Claude Code 2.1.332, Codex 0.148.0; details in
+[claude-code.md](../getty-bun-integration/references/claude-code.md)).
+
 The hook lines are source-checked against the hosts, not executed under them by this
 project yet; the starters themselves are executed in agent-bun-runtime CI.
 
@@ -194,9 +261,9 @@ after an install or a Bun bump downloads, and a hook that waited out a crashed i
 downloads itself. `600` leaves 300 s for the download. Host defaults are lower on some
 events (Claude Code `UserPromptSubmit`: 30 s). Put no starter call on `SessionEnd` or
 Codex `Interrupt`: their budget is seconds. A plugin whose MCP server runs through the
-starter adds a `SessionStart` hook `ensure` with timeout 600, so the server's first start
-finds Bun installed ([contract.md](../getty-bun-integration/references/contract.md),
-"Long-lived stdio server").
+starter runs it with `run-mcp` and adds a `SessionStart` hook `ensure` with timeout 600
+(above, "MCP server"); the server's first start finds Bun only if that install finishes
+within `run-mcp`'s wait.
 
 Otherwise no separate install hook and no Bun on PATH: the first `run` hook installs,
 concurrent hooks wait on the starter's lock.
@@ -221,6 +288,7 @@ skilletor sync --scope project
 cmp bootstrap/getty-bun.sh  .claude/skills/getty-bun-install/bootstrap/getty-bun.sh
 cmp bootstrap/getty-bun.ps1 .claude/skills/getty-bun-install/bootstrap/getty-bun.ps1
 cmp bootstrap/getty-bun.cmd .claude/skills/getty-bun-install/bootstrap/getty-bun.cmd
+test "$(git check-attr eol bootstrap/getty-bun.cmd | sed 's/.*: //')" = lf
 grep -qx "# version $(jq -r .gettyBun.bunVersion package.json)" bootstrap/getty-bun.sh
 p=$(jq -r '.gettyBun.platforms // empty | join(" ")' package.json)
 if [ -n "$p" ]; then grep -qx "# platforms $p" bootstrap/getty-bun.sh
@@ -230,8 +298,13 @@ elif grep -q '^# platforms ' bootstrap/getty-bun.sh; then echo 'platforms line w
 `cmp` fails when the render failed (a fresh checkout has no rendered copy); the `grep`
 lines catch a stale local copy. The platforms check wants the `# platforms` line equal to
 `gettyBun.platforms`, in its order, and no such line when `package.json` declares none;
-written for a shell with `set -e`, as CI steps run. Drop the `.cmd` line if the plugin does
-not commit the polyglot. Run the second block (`trust`, `sync`, `cmp`, `grep`) before
+written for a shell with `set -e`, as CI steps run. The `check-attr` line fails unless
+`.gitattributes` gives the polyglot `eol=lf` (section 2): checked out with CRLF, bash
+fails on it with exit 2, which Claude Code reads as a blocking hook (agent-developer
+review, 2026-11-27, reproduced there; the line itself executed locally with git 2.47.3,
+exit 1 without the attribute, 0 with `* text=auto eol=lf`). Drop the `.cmd`
+`cmp` and `check-attr` lines if the plugin does not commit the polyglot. With
+`"into": "plugin"` the `cmp` lines compare against `skills/getty-bun-install/bootstrap/`. Run the second block (`trust`, `sync`, `cmp`, `grep`) before
 every commit that touches the starters, the pin or the `ref`; a machine where skilletor
 detects a harness needs no user-config line.
 

@@ -74,6 +74,8 @@ For process termination tests, use isolated fixture stores and fixture processes
 
 Prioritize the real release gate and concrete failure risks. Do not add tests that merely repeat metadata literals or unrelated broad suites. After meaningful checks pass, stop optional expansion and deliver the work.
 
+Bun outside the starter (a consumer's `bun test`, a probe running an unbundled `.ts` entry) writes its transpiler cache into the user's home unless told otherwise; the starters set `BUN_RUNTIME_TRANSPILER_CACHE_PATH=0`, so this concerns only runs outside them. Bun 1.4.5 put it in `$HOME/.bun/install/cache/@t@/` with only `HOME` set, ignored `BUN_INSTALL_CACHE_DIR` and `BUN_INSTALL` for it, and followed `XDG_CACHE_HOME` to `$XDG_CACHE_HOME/bun/@t@/`; with `BUN_RUNTIME_TRANSPILER_CACHE_PATH=0` it wrote nothing (executed, Bun 1.4.5 linux-x64, `.dev/harness/bun --no-install --config=/dev/null --no-env-file entry.ts` under `env -i` with a fresh temporary `HOME` per run and an entry of about 3000 lines; a consumer saw it ignore `XDG_CACHE_HOME` as well, not reproduced here; macOS and Windows not checked). A verification run therefore sets `HOME` (and `XDG_CACHE_HOME`) to a temporary directory, or `BUN_RUNTIME_TRANSPILER_CACHE_PATH=0` as the starters do.
+
 For documentation-only changes, validate frontmatter, schema/examples, relative references, and an independent realistic integration scenario. Record runtime cases as not executed. For starter or adapter changes, run them in the claimed environments or narrow the support statement to what was observed.
 
 Use [the review template](../assets/integration-review-template.md) to summarize decisions, evidence, limitations, and any required host activation step.

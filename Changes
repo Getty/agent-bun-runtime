@@ -23,9 +23,7 @@ Revision history for agent-bun-runtime
   - Entry arguments that start with "-" reach the entry unchanged, also
     through getty-bun.ps1; the contract no longer forbids them. On Windows,
     PowerShell's -File rejects some of them before the starter runs: pass
-    no lone "-" and nothing beginning with "-:". Through getty-bun.cmd from
-    a PowerShell hook shell, also pass no "--%" and no "-" argument that
-    contains a blank.
+    only options of the form -x, --name or --name=value, without blanks.
   - getty-bun.cmd re-runs its line under bash only once
     (GETTY_BUN_POLYGLOT_REEXEC); a "bash" on PATH that is really dash fails
     with one getty-bun line and exit 1 instead of looping.
@@ -43,10 +41,12 @@ Revision history for agent-bun-runtime
   - Consumer requirement: gettyBun.platforms (linux, darwin, windows) in
     requirement.schema.json declares where a consumer runs.
   - Contract: the long-lived stdio server (an MCP server) is a second entry
-    kind that runs through the starter, with the rules for stdout, signals
-    and the install before the first start.
+    kind that runs through run-mcp, never run, with the rules for stdout,
+    signals and the install before the first start (a SessionStart ensure
+    hook).
   - Contract: how an MCP server starts under Codex (no plugin root, no
-    GETTY_HOME and no CODEX_HOME in its environment) and under Claude Code.
+    GETTY_HOME and no CODEX_HOME in its environment; the declaration
+    lists env_vars GETTY_HOME and GETTY_BUN_MIRROR) and under Claude Code.
   - Contract: an entry that starts a detached long-lived child process
     follows the rules in dependencies-and-execution.md.
   - Skill getty-bun-install installs getty-bun.cmd beside the starters and

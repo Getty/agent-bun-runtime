@@ -125,11 +125,11 @@ source-checked, **not executed under Codex**:
 
 ## Hook facts that shape the adapter
 
-All documented, not executed ([Hooks](https://learn.chatgpt.com/docs/hooks.md)):
+All documented, not executed, except where a row says so ([Hooks](https://learn.chatgpt.com/docs/hooks.md)):
 
 | Fact | Consequence |
 | --- | --- |
-| `command` and `mcp_tool` handlers are supported; `prompt` and `agent` are parsed but skipped. | The starter is a `command` handler; an `mcp_tool` hook needs no codec. |
+| `command` and `mcp_tool` handlers are supported; `prompt` and `agent` are parsed but skipped. Exception, executed by K9 (agent-irc live check, 2026-11-27, Codex 0.148.0, Linux): 0.148.0 skips every `mcp_tool` hook (`MCP invocation is not available yet`); later versions not executed. | The starter is a `command` handler; an `mcp_tool` hook needs no codec, but does not run on Codex 0.148.0. |
 | `commandWindows` is an optional Windows-only command override. | Windows gets the PowerShell starter line. |
 | Plugin hook commands receive `PLUGIN_ROOT` and `PLUGIN_DATA`; Codex also sets `CLAUDE_PLUGIN_ROOT` and `CLAUDE_PLUGIN_DATA` for compatibility. | Locate the starter from the plugin root; never infer the host from these variables. |
 | Commands run with the session `cwd` as working directory. | The starter derives the consumer root from its own path; the entry sees the project as `location.processCwd`. |
@@ -213,18 +213,41 @@ in substance at `57b493a` (main, 2026-11-27); file and line below are from `3d2e
   (`codex-rs/hooks/src/engine/command_runner.rs:420-424`).
   For `CODEX_HOME` executed by agent-irc (live, 2026-09-08, Codex 0.154.0-alpha.6: a
   session under an isolated `CODEX_HOME` started the server copy from `~/.codex`). For
-  `GETTY_HOME` and the `GETTY_BUN_*` variables derived from the source, not executed.
+  `GETTY_HOME` and `GETTY_BUN_MIRROR` executed by agent-irc K9 (hub, 2026-11-27, Codex
+  0.148.0, Linux): both were set for Codex and neither reached the server, so its
+  starter used `~/.getty` and downloaded from github.com. The other `GETTY_BUN_*`
+  variables follow from the same source, not executed.
+- **Codex's own environment reaches the server only by name.** `env_vars` names
+  variables whose values Codex copies from its own environment; a variable Codex has but
+  the declaration does not name never arrives, and one the declaration names but Codex
+  lacks is skipped (`codex-rs/rmcp-client/src/utils.rs:16-26`; a plugin declaration
+  parses `env_vars` into the same server config,
+  `codex-rs/codex-mcp/src/plugin_config.rs:156-157`). Source-checked. This
+  settles K9's L6, which has a mirror or a moved `GETTY_HOME` work under Codex if Codex's
+  own environment has it: necessary, not sufficient; the declaration must also name
+  it. So the server declaration carries `"env_vars": ["GETTY_HOME", "GETTY_BUN_MIRROR"]`
+  (plan spec, 0.2.0 rework); without it the server's starter waits for a slot under
+  `~/.getty` while the `SessionStart` hook installs into `$GETTY_HOME`. That `env_vars`
+  in a plugin declaration passes them is source-checked, not executed.
 - **Where the copies are.** An installed plugin lives under
   `<CODEX_HOME>/plugins/cache/<marketplace>/<plugin>/<version>/`; an update within one
   marketplace removes the older versions
   (`codex-rs/core-plugins/src/store.rs:26,131-138,699-705`).
-- **Start timeout.** 30 s by default, `startup_timeout_sec` in the declaration
-  (`codex-rs/codex-mcp/src/rmcp_client.rs:98`).
+- **Start timeout.** 30 s by default (`codex-rs/codex-mcp/src/rmcp_client.rs:98`);
+  K9 saw `timed out handshaking with MCP server after 29.999999777s`, logged only at the
+  end of the session. A plugin cannot raise it: in K9 (Codex 0.148.0)
+  `startup_timeout_sec` took effect only through a user-level `[mcp_servers.<name>]`
+  with its own `command` (a 45 s install then connected after 46.9 s); a `-c` override of
+  the field alone was rejected. The source at `3d2ee51` parses `startup_timeout_sec` in a
+  plugin declaration too (`codex-rs/config/src/mcp_types.rs:351,419`); whether a newer
+  Codex honors it there is not executed.
 
 So the consumer carries a locator: a `sh -c` one-liner in its Codex MCP declaration
 (`.mcp.json` at the plugin root, or the file the Codex manifest's `mcpServers` names)
-that finds the newest installed copy of its own starter and `exec`s it. For a plugin
-named `example`:
+that finds the newest installed copy of its own starter and `exec`s it in the starter's
+`run-mcp` mode (in `getty-bun.sh` from the 0.2.0 rework; executed locally on Linux `sh`,
+`bootstrap/test/run-mcp.test.ts`; the CI legs are pending). For a
+plugin named `example`:
 
 ```json
 {
@@ -233,8 +256,9 @@ named `example`:
       "command": "sh",
       "args": [
         "-c",
-        "n=; for f in \"${CODEX_HOME:-$HOME/.codex}\"/plugins/cache/*/example/*/bootstrap/getty-bun.sh; do [ -f \"$f\" ] || continue; [ -z \"$n\" ] || [ \"$f\" -nt \"$n\" ] && n=$f; done; [ -n \"$n\" ] || { echo \"example: no installed copy under ${CODEX_HOME:-$HOME/.codex}/plugins/cache\" >&2; exit 1; }; exec sh \"$n\" run dist/server.js codex"
-      ]
+        "n=; for f in \"${CODEX_HOME:-$HOME/.codex}\"/plugins/cache/*/example/*/bootstrap/getty-bun.sh; do [ -f \"$f\" ] || continue; [ -z \"$n\" ] || [ \"$f\" -nt \"$n\" ] && n=$f; done; [ -n \"$n\" ] || { echo \"example: no installed copy under ${CODEX_HOME:-$HOME/.codex}/plugins/cache\" >&2; exit 1; }; exec sh \"$n\" run-mcp dist/server.js codex"
+      ],
+      "env_vars": ["GETTY_HOME", "GETTY_BUN_MIRROR"]
     }
   }
 }
@@ -242,7 +266,8 @@ named `example`:
 
 The starter finds the consumer root from its own path, so `dist/server.js` resolves
 whatever the server's working directory is; the trailing `codex` is the entry's host
-argument, as for hooks. Executed with a stub starter in a temporary tree, not under Codex:
+argument, as for hooks. The locator executed with a stub starter in a temporary tree, not
+under Codex, when the line still read `run` (the mode word does not change the search):
 dash, bash and busybox `sh` pick the newer of two copies across marketplaces; dash and
 bash keep a `HOME` with a space intact; dash, with the JSON string as parsed and an
 environment of `HOME` and `PATH` only, honors a set `CODEX_HOME` and exits 1 with the one
@@ -256,25 +281,32 @@ Limits:
   `~/.codex`: it finds nothing and the server does not start, or it starts an older copy
   installed there, with that home's configuration (agent-irc, above). The same holds for
   `GETTY_HOME`: the server's starter uses `~/.getty` while the hooks use `$GETTY_HOME`,
-  so the `ensure` below prepares another store than the one the server installs into
-  (derived, not executed). Source-checked, not executed: `"env_vars": ["CODEX_HOME",
-  "GETTY_HOME"]` in the declaration passes both when Codex itself has them; a consumer
-  that adds it checks it in a real run first.
+  so the `ensure` below prepares another store than the one the server waits on
+  (executed for `GETTY_HOME` and `GETTY_BUN_MIRROR` by K9, Codex 0.148.0; see above).
+  The `env_vars` in the declaration above passes both when Codex itself has them;
+  adding `"CODEX_HOME"` to it lets the locator search a non-default home too.
+  Source-checked, not executed; a consumer checks it in a real run first.
 - **Several cached copies.** The newest starter by modification time wins. Several copies
   exist when the plugin is installed from more than one marketplace (the first `*`);
   which one the user enabled is not visible to the locator.
 - **No Windows way.** The declaration assumes `sh`; there is no `commandWindows` for MCP
   servers. agent-irc keeps its server off on Windows; a Windows MCP launcher is `k13`, not
-  in 0.2.0. Declare `gettyBun.platforms` without `windows` ([contract.md](contract.md),
-  "Canonical consumer requirement").
+  in 0.2.0. Declaring `gettyBun.platforms` without `windows` ([contract.md](contract.md),
+  "Canonical consumer requirement") does not change that for `run-mcp`: on an undeclared
+  platform `getty-bun.sh` serves its stub on POSIX, but on Windows `getty-bun.ps1 run-mcp`
+  fails with exit 1 before it reads the pin (`k13`), and the Git Bash forwarding hands
+  `run-mcp` to it before its own platforms check (source-checked, `bootstrap/getty-bun.ps1`
+  and `bootstrap/getty-bun.sh`).
 - **stdout is the protocol only.** The starter writes its messages to stderr, also during
   a first install, and its exit code passes through (starter side executed,
   `bootstrap/test/stdio-server.test.ts`, Linux `sh`). Nothing in the locator writes to
   stdout.
 
-**Install before the first start.** The server's `run` installs a missing slot itself,
-under the lock, and a first download can outlast the start timeout. A `SessionStart`
-command hook calls `ensure` (timeout 600) so that the next start finds a ready slot:
+**Install before the first start.** The server line uses `run-mcp`, never `run`: `run`
+installs a missing slot itself, and a first download can outlast the 30 s start timeout.
+`run-mcp` installs nothing. With a ready slot it `exec`s the entry as `run` does; with
+a missing one it waits up to `GETTY_BUN_MCP_WAIT` seconds (default 20) for the
+slot a `SessionStart` command hook installs with `ensure` (timeout 600):
 
 ```json
 "command": "sh \"${PLUGIN_ROOT}/bootstrap/getty-bun.sh\" ensure",
@@ -282,10 +314,18 @@ command hook calls `ensure` (timeout 600) so that the next start finds a ready s
 "timeout": 600
 ```
 
-Whether Codex starts MCP servers before, during or after the `SessionStart` hooks is not
-traced, so the very first session after an install may still see the server fail to
-start. No starter call on `SessionEnd` or `Interrupt` (timeout 1 s, at most 3 s; table
-above).
+So the first session after an install has the real server only if that `ensure` finishes
+within the wait. Otherwise, and on every other failure (mismatch, invalid settings,
+broken pin, unsupported platform), `run-mcp` writes one `getty-bun: ` line to stderr and
+answers as a stub server without tools until the end of input. The starter side of this
+paragraph is executed on Linux `sh` (`bootstrap/test/run-mcp.test.ts`, CI not yet run),
+except the broken pin, which that suite does not check; under a real host: not executed.
+Under Codex the stub does no harm: Codex keeps no cache that blocks the server, and the next session
+starts it again and finds the slot `ensure` installed (K9, Codex 0.148.0: after a start
+timeout the next session installed and ran). Nothing resumes an aborted start; it is
+simply retried. The entry itself answers `initialize` before doing anything that can
+fail, so the real server never ends before the handshake either (plan spec). No starter
+call on `SessionEnd` or `Interrupt` (timeout 1 s, at most 3 s; table above).
 
 **Format of the plugin decides.** A plugin whose root `plugin.json` carries the Agent
 Plugins `$schema` (as the onboarding example below) is read in the Agent Plugins format
@@ -296,9 +336,10 @@ instead (`codex-rs/core-plugins/src/manifest.rs:160-190`,
 there. In exchange Codex substitutes `${PLUGIN_ROOT}` in `args`, `env` and `cwd`, sets
 `PLUGIN_ROOT` and `PLUGIN_DATA` in the server's environment and starts it in the plugin
 root (`codex-rs/codex-mcp/src/agent_plugin_config.rs:38-70,150-247`): there
-`"command": "sh", "args": ["${PLUGIN_ROOT}/bootstrap/getty-bun.sh", "run",
+`"command": "sh", "args": ["${PLUGIN_ROOT}/bootstrap/getty-bun.sh", "run-mcp",
 "dist/server.js", "codex"]` would need no locator. Source-checked only; no real Codex has
-run it. The `CODEX_HOME` and `GETTY_HOME` limit stays.
+run it. The `GETTY_HOME` and `GETTY_BUN_MIRROR` limit stays; whether that format accepts
+`env_vars` is not checked.
 
 A provider-side locator (a template beside the starter, specified in the contract) waits
 for a second MCP consumer with the same need; until then the search is Codex's quirk and

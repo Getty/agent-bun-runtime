@@ -6,8 +6,10 @@ codec is **doc-checked** against the hooks reference
 (https://code.claude.com/docs/en/hooks, fetched 2026-11-26) and **source-checked** against
 the bundled JavaScript of `@anthropic-ai/claude-code` 2.1.332 (never run), with line and
 byte offset in agent-bun-runtime `src/claude-code.ts`. **Executed** only through payloads
-loadguard recorded on Claude Code 2.1.283, which the codec's fixtures reuse; no real
-Claude Code has run the codec or a starter hook from agent-bun-runtime. Read
+loadguard recorded on Claude Code 2.1.283, which the codec's fixtures reuse. A starter has
+run under real Claude Code once: agent-irc's live check K9 (hub-observed, Claude Code
+2.1.332, Linux x64) started agent-irc's MCP server through the 0.1.0 starter. No real
+Claude Code has run the codec, a codec hook from agent-bun-runtime or `run-mcp`. Read
 [contract.md](contract.md) for the declaration and the starter interface, [sdk.md](sdk.md)
 for the entry.
 
@@ -294,44 +296,115 @@ Evidence:
 
 ## MCP servers
 
-A plugin's MCP server can run through the starter as a long-lived stdio server
-([contract.md](contract.md), "Long-lived stdio server"; 0.2.0): `.mcp.json` at the plugin
-root, Linux and macOS:
+A plugin's MCP server runs through the starter as a long-lived stdio server
+([contract.md](contract.md), "Long-lived stdio server"; 0.2.0), started by `run-mcp`, not
+by `run` or `run-ready`. Two declarations belong together. The server, in `.mcp.json` at
+the plugin root, Linux and macOS:
 
 ```json
 {
   "mcpServers": {
     "example": {
       "command": "sh",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/bootstrap/getty-bun.sh", "run", "dist/server.js", "claude-code"]
+      "args": ["${CLAUDE_PLUGIN_ROOT}/bootstrap/getty-bun.sh", "run-mcp", "dist/server.js", "claude-code"]
     }
   }
 }
 ```
 
-or a wrapper of the plugin's own that ends in `exec sh .../getty-bun.sh run dist/server.js
-claude-code`. Shape documented (plugins reference: `.mcp.json`, `${CLAUDE_PLUGIN_ROOT}`
-substituted), not executed under Claude Code here.
+or a wrapper of the plugin's own that ends in `exec sh .../getty-bun.sh run-mcp
+dist/server.js claude-code`; and the install, a `SessionStart` command hook in
+`hooks/hooks.json`:
 
-- **stdout is the protocol only.** The starter's messages go to stderr, also during a
-  first install, and `getty-bun.sh` `exec`s Bun under the same PID, so the host's signals
-  and end of input reach the server and its exit code passes through (starter side
-  executed, `bootstrap/test/stdio-server.test.ts`, Linux `sh`).
-- **Install before the first start.** Add a `SessionStart` command hook
-  `sh "${CLAUDE_PLUGIN_ROOT}/bootstrap/getty-bun.sh" ensure` with `"timeout": 600`, so the
-  first MCP start finds a ready slot: Claude Code's MCP start timeout may be shorter than
-  an install (its value and `MCP_TIMEOUT` are not checked here). Whether `SessionStart`
-  runs before the MCP servers start is not checked either; a server that starts first
-  waits on the same lock, and if the host gives up on it, an interrupted download is kept
-  and resumed by the next install (0.2.0). The slot is shared: if another consumer has
-  installed the same pin, the server is on the fast path at once.
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command",
+        "command": "sh \"${CLAUDE_PLUGIN_ROOT}/bootstrap/getty-bun.sh\" ensure",
+        "timeout": 600 } ] }
+    ]
+  }
+}
+```
+
+Shapes documented (plugins reference: `.mcp.json`, `${CLAUDE_PLUGIN_ROOT}` substituted), not
+executed under Claude Code with this starter. **Session 1 has the real server only if the
+`ensure` install finishes within `run-mcp`'s wait** (default 20 s); otherwise the starter's
+stub answers in session 1, without tools, and the next session starts the real server.
+
+**How Claude Code starts an MCP server.** Hub-observed, Claude Code 2.1.332, Linux x64,
+with isolated `HOME`, `CLAUDE_CONFIG_DIR` and XDG directories and `claude -p` without a
+login: the agent-developer probe `docs/2026-11-27-claude-code-mcp-sperre.md` (a probe
+plugin, not this starter) and agent-irc's live check K9 (agent-irc with the 0.1.0
+starter).
+
+- **Start timeout 30 000 ms** (debug log: `Starting connection with timeout of 30000ms`).
+  `MCP_TIMEOUT` in Claude Code's environment changes it (K9: with 90000 a 65 s install
+  connected after 66.8 s); the plugin cannot set it.
+- **The handshake opens with `server/discover`**, string id `"server-discover-probe-1"`,
+  protocol `2026-07-28`. A server that does not answer it hangs the start; after an
+  answer (an error `-32601` or `result: {}` is enough) the same process gets `initialize`
+  (protocol `2025-11-25`), `notifications/initialized` and `tools/list`. So every message
+  with an `id` needs a response, and an `id` can be a string.
+- **The MCP start runs in parallel to `SessionStart`**: with a `SessionStart` hook that
+  slept 5 s, the server started 0.7 ms after the hook, not after its end. A `SessionStart`
+  `ensure` therefore never has the slot in place before the first MCP start. That was
+  under `-p`; whether an interactive session waits for `SessionStart` is not checked.
+- **No reconnect** in the running session, not even after an install by hand (K9).
+- **The block.** Any end of the server before `initialize` completes, the start timeout
+  as much as a quick exit, with exit 0 as with exit 1, makes Claude Code write an entry to
+  `mcp-needs-auth-cache.json` and not start that server for about 15 minutes (an entry
+  dated 14 minutes back still blocked, at 16 the server started; K9 saw the same). The
+  first successful connect clears the entry. A changed server line (in the probe: `args`)
+  is not blocked; whether a plugin update counts as changed through its new
+  `${CLAUDE_PLUGIN_ROOT}` alone is not checked.
+- **`mcp_tool` hooks wait 5 s** for a server that is still starting, then are skipped
+  (`skipped — MCP server not connected`); in K9 the first `UserPromptSubmit` and the next
+  event were lost that way. Against a server without tools, a `tools/call` answered with
+  `-32601` is a non-blocking hook error (`Method not found`; the prompt went ahead), one
+  answered with `{"content":[]}` is no error.
+
+**What `run-mcp` does** (0.2.0, as specified in agent-bun-runtime `docs/plan.md`, "Rework
+after the hub review"; starter side executed locally on Linux `sh`,
+`bootstrap/test/run-mcp.test.ts`: `ready` execs under the same PID, the wait with a
+concurrent `ensure`, the stub transcript, signals, the fallback cases; CI legs pending; not
+run under Claude Code):
+
+- **Slot `ready`:** exactly `run`. Bun replaces the starter by `exec` under the same PID,
+  so the host's signals and end of input reach the server and its exit code passes
+  through; stdout is the protocol only, every starter message goes to stderr (for `run`
+  executed, `bootstrap/test/stdio-server.test.ts`, Linux `sh`). The slot is shared: if
+  another consumer has installed the same pin, the server is on this path at once.
+- **Slot `missing`:** `run-mcp` installs nothing itself (no lock, no download). It waits
+  for the slot the `SessionStart` `ensure` is installing, at most `GETTY_BUN_MCP_WAIT`
+  seconds (whole number, default 20, below the 30 s start timeout), and `exec`s as above
+  once the slot is ready. Raise the wait only together with `MCP_TIMEOUT`, and keep it
+  below.
+- **Every other case** (still missing after the wait, `mismatch`, an invalid setting, a
+  missing or broken pin, an unsupported platform, no entry): one `getty-bun: ` line with
+  the reason on stderr, then the starter becomes a **stub server** without Bun. It answers
+  every message with an `id`, `server/discover` included: `initialize` without tools and
+  with `instructions` naming the reason and that the server is there from the next
+  session, `tools/list` empty, `tools/call` `{"content": []}`, `ping` `{}`, anything else
+  `-32601`. It stays until end of input or a signal. It never ends before `initialize`,
+  so Claude Code connects and sets no block.
+- **So in session 1** the server's tools are missing unless the install made the wait,
+  `mcp_tool` hooks against the stub do nothing and report no error, and the next session
+  starts the real server. While `run-mcp` waits, nothing has answered `initialize`: an
+  `mcp_tool` hook in that time is skipped after 5 s.
+- **The entry answers `initialize` before anything that can fail.** The block hits a Bun
+  entry just as it hits the starter: a server that throws, exits or hangs before the
+  handshake, on a bad config or an unreachable backend, is off for about 15 minutes. Do
+  that work after `initialize` and report its failures through the protocol.
 - **No starter call on `SessionEnd`** (above): its 1.5 s budget is too short.
 - **No SDK dependency** is needed for such an entry until the SDK has MCP (phase 5).
 - **Windows is not covered.** An MCP server has no shell form, so the polyglot cannot
   start it, and exec form on a `.cmd` fails with EINVAL (measured by windows-developer,
-  2.1.287). A plugin keeps its server off on Windows (agent-irc keeps its `mcpoff`
-  launcher there); a Windows MCP launcher and a job object that ends Bun with its host are
-  later (agent-bun-runtime `k13`).
+  2.1.287); `getty-bun.ps1 run-mcp` fails with one `getty-bun: ` line, exit 1. A plugin
+  keeps its server off on Windows (agent-irc keeps its `mcpoff` launcher there); a Windows
+  MCP launcher and a job object that ends Bun with its host are later (agent-bun-runtime
+  `k13`).
 
 ## Optional repair hint
 

@@ -121,10 +121,28 @@ before. What changes on a bump, and what to adopt:
    - Claude Code on Windows: ship `bootstrap/getty-bun.cmd` and use the shell-form line
      `. "${CLAUDE_PLUGIN_ROOT}/bootstrap/getty-bun.cmd" run dist/hook.js claude-code; exit $LASTEXITCODE`
      in `hooks/hooks.json` (ADR 0010; skill `getty-bun-install`). Plugins that serve Claude
-     Code only on Linux and macOS keep their `sh` lines.
-   - A long-lived stdio server (MCP) under the starter: `contract.md`, "Long-lived stdio
-     server"; under Codex `codex.md` (the locator lives in the consumer); add a
-     `SessionStart` command hook `ensure` with timeout 600.
+     Code only on Linux and macOS keep their `sh` lines. Commit `.gitattributes` with
+     `bootstrap/getty-bun.cmd text eol=lf` (or `* text=auto eol=lf`): with CRLF, bash and
+     dash end with exit 2, which Claude Code reads as a block on every call; the drift check
+     tests `git check-attr eol bootstrap/getty-bun.cmd` = `lf`.
+   - A long-lived stdio server (MCP) under the starter, through **`run-mcp`**, never `run`
+     or `run-ready`: `sh "${CLAUDE_PLUGIN_ROOT}/bootstrap/getty-bun.sh" run-mcp
+     dist/server.js <host>`, plus a `SessionStart` command hook `ensure` with timeout 600
+     (`contract.md`, "Long-lived stdio server"). Claude Code 2.1.332 blocks an MCP server for
+     about 15 minutes after any end before `initialize` (hub-observed), and the MCP start
+     runs in parallel to `SessionStart`. So `run-mcp` never installs: with a ready slot it
+     runs the server, otherwise it waits up to `GETTY_BUN_MCP_WAIT` (default 20 s) for the
+     slot the `ensure` hook installs, and if there is still none it answers as a server
+     without tools until end of input. Session 1 has the real server only if the install
+     finishes within the wait; the next session has it. The server entry answers
+     `initialize` before anything that can fail. Under Codex the locator lives in the
+     consumer (`codex.md`) and the declaration carries `env_vars: ["GETTY_HOME",
+     "GETTY_BUN_MIRROR"]`. Not on Windows (`k13`).
+   - Offline without a slot, a hook through `run` or `ensure` ends with exit 1 and one
+     `getty-bun:` line; Codex drops a failed start hook's output silently. `run-ready`
+     exits 0 there, an MCP server under `run-mcp` gets the stub.
+   - Windows options in entry arguments: only `-x`, `--name` or `--name=value`, without
+     blanks (the limits above are the reason). The rule binds only on Windows.
 5. **Per consumer:**
    - **skilletor:** bump; Claude Code on Windows through the polyglot (F2); CLI flags on
      Windows pass through `getty-bun.ps1` (F4); macOS (F5); the background sync keeps
@@ -134,10 +152,13 @@ before. What changes on a bump, and what to adopt:
      ["linux"]` instead of the `uname` guard (L4); the watcher as a detached child
      (`dependencies-and-execution.md`). The latency gate (L3) is measured by the hub on
      reuben after the bump.
-   - **agent-irc:** bump; the server through the starter as a long-lived stdio server
-     (G2) with a `SessionStart` `ensure` hook (G3), `gettyBun` without an SDK dependency;
-     under Codex the `sh -c` locator (G5; `codex.md` also names `env_vars` for
-     `GETTY_HOME` as source-checked, not run); macOS (F5). Windows stays off (G4).
+   - **agent-irc:** bump; the server line through `run-mcp` (not `run`) with a
+     `SessionStart` `ensure` hook, timeout 600 (G2, G3, K9); the server answers
+     `initialize` first and follows the lifetime rules of `contract.md` (EOF, EPIPE, the
+     first signal counts, cleanup within about 0.5 s, exit 0 or 128+n); `gettyBun`
+     without an SDK dependency; under Codex the `sh -c` locator with `run-mcp` and
+     `env_vars: ["GETTY_HOME", "GETTY_BUN_MIRROR"]` (G5, K9); macOS (F5). Windows stays off
+     (G4).
 
 ## Not in 0.2.0
 

@@ -139,8 +139,9 @@ getty-bun.ps1 <same commands>         identical behavior and exit codes
   if that probe does not pass, leaving the slot as published; the next call takes the
   fast path (source-checked, `bootstrap/getty-bun.ps1:675-681`). `getty-bun.sh` and
   `bootstrap/README.md` have no such second probe.
-- Target on the fast path: `getty-bun.sh` detects it on every call (`uname`,
-  `/proc/cpuinfo`). `getty-bun.ps1` on x64 does not detect the CPU: it takes the first
+- Target on the fast path: from 0.2.0 `getty-bun.sh` on x64 takes the first slot that exists
+  of `<os>-x64`, then `<os>-x64-baseline`, and reads `/proc/cpuinfo` only when neither
+  exists (before 0.2.0 it detected on every call). `getty-bun.ps1` on x64 does not detect the CPU: it takes the first
   slot that exists of `windows-x64`, then `windows-x64-baseline`; `ready` runs it,
   `mismatch` fails closed (a mismatching `windows-x64` slot is never skipped for a ready
   baseline one). Only when neither exists does it detect AVX2 (`IsProcessorFeaturePresent`
@@ -418,6 +419,50 @@ detached long-lived children (session, nice, file descriptors, RSS) in
 11.5.1 or later, Node 22.14.0 or later; 0.2.0 is its first publish, in the order of
 [release-0.1.0.md](release-0.1.0.md), "After the release"); 15.
 [release-0.2.0.md](release-0.2.0.md) with the consumers' move from `v0.1.0`.
+
+**Rework after the hub review** (2026-11-27, hub card `agent-developer k14`, review
+`abr-0.2.0.review.md` V1–V4, H1–H11, and the hub's Claude Code probe: every end of an MCP
+server before `initialize` completes, timeout or a quick exit 0 alike, blocks the server for
+about 15 minutes in Claude Code 2.1.332; the MCP start runs in parallel to `SessionStart`).
+
+*`run-mcp <entry> [args...]`* (`getty-bun.sh`), the starter mode for a long-lived stdio
+(MCP) server. The name follows `run-ready`: a `run` variant named after when it runs.
+
+- Slot `ready` and `<root>/<entry>` a readable regular file: exactly `run` (same `exec`,
+  PID, flags, environment).
+- Slot `missing`: no install of its own (no lock, staging or download). It waits for the
+  slot a `SessionStart` `ensure` is installing, polling the slot state about every 0.25 s,
+  for at most `GETTY_BUN_MCP_WAIT` seconds (whole number, default 20, below both hosts'
+  30 s); ready within the wait: `exec` as above.
+- Every other way (still missing after the wait, `mismatch`, an invalid `GETTY_HOME`,
+  `GETTY_BUN_LOCK_WAIT` or `GETTY_BUN_MCP_WAIT`, a missing or broken pin, an unsupported or
+  undeclared platform, a missing entry argument, a `<root>/<entry>` that is no readable
+  regular file once the slot is ready, after the wait too, where Bun would exit 1) never
+  ends before `initialize`. The starter writes one `getty-bun: ` line with the reason to
+  stderr and becomes a **stub server** (POSIX tools only, for example `awk`; no Bun):
+  - stdout carries only JSON-RPC, one message per line, flushed per line;
+  - every message with an `id` gets a response with that `id` verbatim (number or string;
+    Claude Code first sends `server/discover` with `"server-discover-probe-1"`); only the
+    top-level `id` and `method` count, an `"id"` inside `params` never does, whatever the
+    key order;
+  - `initialize`: `protocolVersion` as the client asked, `capabilities: {"tools": {}}`,
+    `serverInfo: {"name": "getty-bun-stub", "version": "<pin>"}`, `instructions` naming the
+    reason and that the server is there from the next session; `tools/list` →
+    `{"tools": []}`; `tools/call` → `{"content": []}`; `ping` → `{}`; anything else with an
+    `id` → error `-32601`; notifications get no response; a line it cannot read is
+    ignored;
+  - end of input → exit 0; a signal → it ends within 0.5 s, by that signal or with
+    128 + n; the first signal counts (two different signals at the same instant may be handled in
+    signal-number order). Signals during the wait end it the same way.
+- Windows: `getty-bun.ps1 run-mcp` (and the Git Bash forwarding) fails with one
+  `getty-bun: ` line, exit 1: MCP servers through the PowerShell starter belong to `k13`.
+- Consumers: server line `sh "${CLAUDE_PLUGIN_ROOT}/bootstrap/getty-bun.sh" run-mcp <entry>
+  <host>` plus the `SessionStart` `ensure` hook with timeout 600; session 1 has the real
+  server only if that install finishes within the wait. Codex: `env_vars: ["GETTY_HOME",
+  "GETTY_BUN_MIRROR"]` in the server declaration. The entry itself answers `initialize`
+  before doing anything that can fail.
+
+Staging cleanup (review H1) is card `k64`, for 0.3.0.
 
 Not in 0.2.0: the Hermes codec, MCP helpers in the SDK, a Windows MCP launcher and the job
 object (`k13`), `k28`.

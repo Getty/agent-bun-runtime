@@ -153,7 +153,10 @@ A failure exits 0 with nothing on stdout, the bytes a `no-decision` ends with, s
 goes on as if the entry had decided nothing. The trade-off: the failure is visible only
 where the host logs a hook's stderr, and a guard on `PreToolUse` or `UserPromptSubmit`
 lets the tool call or prompt through without a word. A guard that must block when it
-fails picks `"closed"` instead.
+fails picks `"closed"` instead. One exception to "nothing on stdout": an `OUTPUT_FAILED`
+under `"silent"` also exits 0, even when part of the hook JSON already reached stdout, so
+the host can read a truncated object after a successful exit (source-checked,
+`src/main.ts`).
 
 ## stdin and stdout
 
