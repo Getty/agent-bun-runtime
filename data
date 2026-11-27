@@ -1,0 +1,23 @@
+---
+class: standard
+completed: 2026-11-27T17:29:34Z
+created: 2026-11-27T14:14:28Z
+id: 52
+priority: high
+started: 2026-11-27T14:16:12Z
+status: done
+tags:
+- bootstrap
+- windows
+- release-0.2.0
+title: 'Claude Code on Windows: the .cmd polyglot (ADR 0010)'
+updated: 2026-11-27T17:29:34Z
+---
+
+Release 0.2.0 (hub card agent-developer k14). Spec: docs/plan.md "Release 0.2.0", ADR 0011. Item 6. Owner decision 2026-11-27, skilletor F2 option (b). bootstrap/getty-bun.cmd, template in getty-bun-install, checked on Linux/macOS shells and the Windows legs. Real desktop measurement stays with the windows-developer hub (card template in the 0.2.0 report).
+
+2026-11-27 14:44 Polyglot bootstrap/getty-bun.cmd delivered by the windows worker (uncommitted). dash ignores dot-source arguments: the polyglot re-runs its line under bash via /proc cmdline (main session choice, ADR 0010). Hook line ends in "; exit $LASTEXITCODE". Windows legs pending.
+
+2026-11-27 15:41 Committed cd5edfe (bootstrap/getty-bun.cmd + template copy), ADR 0010 in 4a8f4bf, CI shells in ab574f8 (hub push pending). Windows CI legs pending; real desktop measurement: card draft in the 0.2.0 report.
+
+Commits on next-0.2.0: cd5edfe, ab574f8, 65237bd, 416bdda. CI 46040193580 green on 30401e0; reviewers approved; merge into main pending owner
