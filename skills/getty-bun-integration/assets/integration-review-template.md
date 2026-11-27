@@ -32,7 +32,7 @@ Contract version 1 (`gettyBun.contractVersion`), agent-bun-runtime release: ____
 | First hook installs without external Bun/Node; concurrent hooks wait | | |
 | Shared slot under `<GETTY_HOME>` per version/target/environment | | |
 | Starter stdout clean, stderr messages; never exits 2 for its own failures; the entry's exit code passes through unchanged | | |
-| Entry exit codes within 0–255; no lone `--` as an entry's first argument, no empty `''` argument through the `.cmd` (other `-` arguments pass unchanged from 0.2.0) | | |
+| Entry exit codes within 0–255; no lone `--` as an entry's first argument, no empty `''` argument through the `.cmd`; where it runs on Windows no lone `-`, no `-:...` and no dash followed only by blanks, which PowerShell's `-File` rejects (other `-` arguments pass unchanged from 0.2.0) | | |
 | Windows: PowerShell 5.1 and 7, Process byte copy, Git Bash forwarding | | |
 | Setup skill for repair and diagnosis | | |
 | Side-by-side update; rollback by previous plugin release | | |

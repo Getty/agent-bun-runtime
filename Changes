@@ -13,7 +13,10 @@ Revision history for agent-bun-runtime
     (.downloads) at the next install; a killed starter leaves no download
     process running.
   - Entry arguments that start with "-" reach the entry unchanged, also
-    through getty-bun.ps1; the contract no longer forbids them.
+    through getty-bun.ps1; the contract no longer forbids them. On Windows,
+    PowerShell's -File rejects a lone "-" (Windows PowerShell 5.1), "-:..."
+    and a dash followed only by blanks before the starter runs; pass none
+    of them.
   - macOS: getty-bun.sh supports darwin-x64 and darwin-aarch64 (a shell under
     Rosetta 2 gets the native Bun) and takes its lock with perl.
   - bootstrap/getty-bun.cmd: one file that is a batch script for cmd.exe

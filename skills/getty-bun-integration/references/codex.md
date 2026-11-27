@@ -113,9 +113,11 @@ source-checked, **not executed under Codex**:
   `"open"` (exit 1) shows the failure and goes on; `"closed"` blocks (below).
 - **Entry arguments beginning with `-`** (0.2.0) reach the entry unchanged through
   `commandWindows` too, although `getty-bun.ps1` runs under `-File`: `-x`, `-x:foo`, `--`,
-  `-`, `--%`, `-File` ([contract.md](contract.md), "Starter interface"). Exception: a lone
+  `--%`, `-File` ([contract.md](contract.md), "Starter interface"). Exceptions: a lone
   `--` directly after the entry, which Bun itself consumes, with or without a starter
-  (executed against a raw Bun 1.4.5, `bootstrap/test/entry-args.test.ts`, Linux `sh`). The
+  (executed against a raw Bun 1.4.5, `bootstrap/test/entry-args.test.ts`, Linux `sh`);
+  and a lone `-`, `-:...` or a dash followed only by blanks, which `powershell.exe -File`
+  rejects before the starter runs (exit 1; source-checked, CI 46027293350 for the lone `-`). The
   `-File` path is covered by the Windows CI legs of that test, which have not run yet.
 
 ## Hook facts that shape the adapter

@@ -19,7 +19,7 @@ The starters are verified in agent-bun-runtime, not in each consumer. The gate p
 
 These gates prove the codecs against recorded or source-derived payloads, not against a host.
 
-Outside the gates, not checked: any host (Codex, Claude Code); a Windows desktop (Defender real-time protection on, an OEM code page, a proxy, AppLocker or WDAC, Constrained Language Mode); a CPU without AVX2; WSL, macOS, musl; the wget download path; hook cost on `linux-aarch64`.
+Outside the gates, not checked: any host (Codex, Claude Code); a Windows desktop (Defender real-time protection on, an OEM code page, a proxy, AppLocker or WDAC, Constrained Language Mode); a CPU without AVX2; WSL, musl; macOS (from 0.2.0 the release's CI adds `macos-15` and `macos-15-intel` legs; until a run is cited, not checked); the wget download path; hook cost on `linux-aarch64`.
 
 ## Consumer behavior
 
@@ -31,15 +31,18 @@ Outside the gates, not checked: any host (Codex, Claude Code); a Windows desktop
 | Matching shared runtime | Two consumers with the same pin use the same absolute slot; the second takes the fast path without network. |
 | Wrong PATH Bun | Ignored; neither adopted nor modified. |
 | Wrong/corrupt slot | Receipt version or target not matching the pin, or the executable missing or empty: fails closed with the path; no overwrite. A Bun whose `--version` differs from the pin is rejected at install only; the fast path never starts Bun, so a damaged non-empty executable is not caught there (plan, scenario 6). |
-| Pin consistency | CI: `gettyBun` validates against the schema (`contractVersion` 1 only); the starters' pin block equals `gettyBun.bunVersion`; the committed starters equal a fresh render of `getty-bun-install` (its "Check the copy in CI"). |
+| Pin consistency | CI: `gettyBun` validates against the schema (`contractVersion` 1 only); the starters' pin block equals `gettyBun.bunVersion`, and its `# platforms` line equals `gettyBun.platforms` (absent when that is not declared); the committed starters, and `getty-bun.cmd` where the plugin commits it, equal a fresh render of `getty-bun-install` (its "Check the copy in CI"). |
 | Bundled entry | CI: a rebuild with the pinned Bun is byte-identical; no `external` packages; a missing import fails at run time without a download. |
 | Entry on the SDK | `bun:test` through `main()` with recorded host payloads (host version named) for every wired event and effect; a malformed payload exits 1, or 2 with `onFailure: "closed"`, with one `agent-bun-runtime: ` line; the host comes from the hook command, not the environment ([sdk.md](sdk.md), "Testing"). |
 | Hostile project | The hook runs from a project with a `bunfig.toml` preload, `.env.local`, `BUN_OPTIONS`, `BUN_INSPECT_PRELOAD` and `NODE_PATH`; none reaches the entry or a Bun child it starts. |
 | Large input | The biggest payload the plugin expects (a `Write` or `PostToolUse` result) stays under `maxInputBytes`, or that hook has its own bound. |
 | Offline after install | `run` works without network. |
+| Hot hook on `run-ready` | Before the first install has finished: exit 0, nothing on stdout, one `getty-bun: ` line naming the slot and the skipped entry, and no lock, staging or download under `GETTY_HOME`; the host treats the hook as passed within its short timeout. After the `SessionStart` install: runs as `run`. A mismatching slot fails closed as with `run`. |
+| Undeclared platform | With `gettyBun.platforms` declared, on a platform it does not list: `run`, `run-ready` and `ensure` exit 0 with nothing on stdout and one `getty-bun: ` line, and install nothing; `status` reports `undeclared` with `target` and `slot` null. An invalid `GETTY_HOME` or `GETTY_BUN_LOCK_WAIT` still exits 1. |
+| macOS | On each claimed Mac target, `darwin-x64` and `darwin-aarch64`: the first hook installs (the lock needs the shipped `/usr/bin/perl`); a Rosetta 2 shell on Apple silicon uses the `darwin-aarch64` slot. |
 | Native Windows and WSL | Separate roots, targets and slots; Git Bash forwarding uses the same slot and lock as PowerShell. |
 | Windows PowerShell | Works on 5.1 and 7 under the host; stdin reaches the entry including end of input, and the hook ends when the entry ends; a blocking execution policy is reported by the setup skill. |
-| Paths and protocols | Spaces and non-ASCII characters in `GETTY_HOME` and the consumer root; under Codex also a plugin root with `"`, `$` or `` ` `` (textual `${PLUGIN_ROOT}` substitution, [codex.md](codex.md)); stdout byte for byte (UTF-8); the starter never exits 2 for its own failures; the entry's exit code passes through unchanged, 2 included, and stays within 0–255; no entry argument begins with `-`. |
+| Paths and protocols | Spaces and non-ASCII characters in `GETTY_HOME` and the consumer root; under Codex also a plugin root with `"`, `$` or `` ` `` (textual `${PLUGIN_ROOT}` substitution, [codex.md](codex.md)); stdout byte for byte (UTF-8); the starter never exits 2 for its own failures; the entry's exit code passes through unchanged, 2 included, and stays within 0–255; every argument after `<entry>` the plugin passes, those beginning with `-` included, reaches the entry byte for byte through each starter path it uses (from 0.2.0), except a lone `--` as the first argument, which Bun consumes, a lone `-`, `-:...` or blank-only dash argument on Windows, which PowerShell's `-File` rejects, and an empty argument where a PowerShell session writes the native call (the polyglot under PowerShell, a `commandWindows` line in Windows PowerShell 5.1) ([contract.md](contract.md), "Entry arguments pass through unchanged (from 0.2.0)"). |
 | Version update A to B | B installs beside A on the first call after update; another consumer pinned to A keeps A. |
 | Rollback | The previous plugin release runs on its still-present slot. |
 | Host trust/activation | Changed hooks obey native review; Codex re-review after a changed bundled script observed; active definitions verified. |

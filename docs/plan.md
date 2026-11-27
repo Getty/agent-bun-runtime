@@ -370,7 +370,12 @@ unworkable reports back instead of changing it.
    is started with `powershell.exe`/`pwsh` `-File` (Codex `commandWindows`), through the
    Git Bash forwarding and through the polyglot (item 6). Then
    `getty-bun-integration` `contract.md` ("Entry arguments never begin with `-`") is
-   rewritten to the rule that holds.
+   rewritten to the rule that holds. Narrowed on 2026-11-27 after CI run 46027293350 (main
+   session's decision): PowerShell's `-File` itself rejects, before the script runs, a
+   lone `-` under Windows PowerShell 5.1 and `-:…` or a dash with only blanks under 5.1
+   and 7 (source-checked against PowerShell's `CommandLineParameterParser.cs`); the
+   Git Bash forwarding and the polyglot start 5.1, so such arguments are not passed on
+   Windows. Every other argument, `-x:foo`, `--` and `--%` included, is.
 5. *macOS* (`k4`). Targets `darwin-x64` (`bun-darwin-x64.zip`) and `darwin-aarch64`
    (`bun-darwin-aarch64.zip`) in `bootstrap/versions.json` for 1.4.5, their SHA256 checked
    against the signed `SHASUMS256.txt.asc` (ADR 0005); `getty-bun.sh` detects them

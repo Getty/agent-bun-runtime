@@ -64,8 +64,9 @@ you observed it.
   through unchanged. Entry codes stay within 0–255 (a limit from Windows that holds on
   every OS). Entry arguments pass through unchanged, those beginning with `-` included
   (from 0.2.0; the 0.1.0 rule against them is withdrawn), except that Bun consumes a lone
-  `--` as the first entry argument and PowerShell drops an empty `''` argument when it
-  calls the `.cmd` ([contract.md](references/contract.md), "Starter interface").
+  `--` as the first entry argument, PowerShell drops an empty `''` argument when it
+  calls the `.cmd`, and on Windows `-File` rejects a lone `-`, `-:...` and a dash followed
+  only by blanks (exit 1) ([contract.md](references/contract.md), "Starter interface").
 - **The entry exits 0, 1, or 2 only with `onFailure: "closed"`.** Both hosts read 2 on
   `PreToolUse` and `UserPromptSubmit` as a block, but also act on it elsewhere: on `Stop`
   and `SubagentStop` it keeps the agent working. `"closed"` only on an entry that serves

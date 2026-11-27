@@ -90,7 +90,8 @@ cp -p "$skill/bootstrap/getty-bun.sh" "$skill/bootstrap/getty-bun.ps1" "$skill/b
 Every hook that needs Bun calls a starter with `run <entry> [args...]`. An entry serving
 both hosts takes the host from its own argument (`claude-code`, `codex`); the SDK never
 guesses it. Entry arguments pass through unchanged, `-` ones included, with one exception
-from Bun 1.4.5: a lone `--` as the first entry argument is dropped (skill
+from Bun 1.4.5: a lone `--` as the first entry argument is dropped; and on Windows
+PowerShell's `-File` rejects a lone `-`, `-:...` and a dash followed only by blanks (skill
 `getty-bun-integration`, [contract.md](../getty-bun-integration/references/contract.md),
 "Entry arguments pass through unchanged").
 

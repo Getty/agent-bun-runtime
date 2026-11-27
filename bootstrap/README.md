@@ -543,7 +543,7 @@ starter: targets"). An install also needs, on `PATH`:
 |---|---|
 | `flock` (Linux) | util-linux `flock`: the starter uses `-w` (bounded wait) and `-E` (timeout exit code) |
 | `perl` (macOS) | The Perl macOS ships (`/usr/bin/perl`, which `/usr/bin/shasum` runs on too), with the core modules `Fcntl` and `Time::HiRes` |
-| `unzip` | Info-ZIP `unzip`: the starter lists members with `-Z1`, which BusyBox `unzip` lacks. A BusyBox built to prefer its applets (Debian's `busybox-static` 1.37.0) runs its own `unzip` before `PATH` when it is the `sh`, so an install under it fails at the member list with one `getty-bun: ` line; the fast path needs no `unzip` (executed 2026-11-27 on Linux: the suite with `sh` resolving to that BusyBox failed every install with that line, 95 of 246 tests) |
+| `unzip` | Info-ZIP `unzip`: the starter lists members with `-Z1`, which BusyBox `unzip` lacks. A BusyBox built to prefer its applets (Debian's `busybox-static` 1.37.0) runs its own `unzip` before `PATH` when it is the `sh`, so an install under it fails at the member list with one `getty-bun: ` line; the fast path needs no `unzip` (executed 2026-11-27 on Linux, measured by the reviewer: with `sh` resolving to that BusyBox, 98 of the current suite's 230 tests fail, every install with that line; 2 of the 98 because its `uname` applet likewise runs before the suite's fake `uname` on `PATH`; card `k60`) |
 | `curl`, or else `wget` | `curl` with `-q` (no `~/.curlrc`); GNU Wget 1.16 or later with `--no-config` (no wgetrc); BusyBox `wget` has no `--no-config` |
 | `sha256sum`, or else `shasum` | coreutils `sha256sum`, or Perl's `shasum -a 256` |
 | `mktemp`, `mkdir`, `mv`, `rm`, `chmod`, `date`, `id`, `tr`, `cat`, `sleep`, `kill` | coreutils (tested) or the macOS base system (not checked); `mktemp` needs `-d` with a template |
@@ -797,9 +797,9 @@ parameter binding before the script sees them in `$args`: pwsh 7 splits `-x:foo`
 starter takes its arguments from the process's own argument vector,
 `[Environment]::GetCommandLineArgs()`, which that binding does not touch: the arguments
 after the first `-File` (or `-f`, `-fi`, `-fil`; with `-`, `--` or `/`) whose next
-argument is a path ending in the running script's file name. Every entry argument,
-`-x`, `-x:foo`, `-x:`, `--`, `-`, `--%`, `-File`, `-Command` and the empty string
-included, then reaches the entry unchanged when the starter is started with
+argument is a path ending in the running script's file name. Every entry argument that
+`-File` accepts (below), `-x`, `-x:foo`, `-x:`, `--`, `--%`, `-File`, `-Command` and the
+empty string included, then reaches the entry unchanged when the starter is started with
 `powershell.exe` or `pwsh` `-File` by a program that builds the command line itself (a
 host's exec form, Bun, the test suite) and through the Git Bash forwarding (which calls
 `-File`, arguments unchanged). The polyglot's batch part passes `%*` to `-File`, so it
@@ -826,6 +826,20 @@ passed `-x`, `-x`, `foo`, `--`, `-`, `-File`, `-Command`, `a b`, `-x`, `y` for
 falls back. Windows PowerShell 5.1, pwsh on Windows, the forwarding and the polyglot on
 Windows: not checked yet, CI legs pending. Arguments with spaces, quotes, a trailing
 backslash and non-ASCII text: executed, CI 45572032454, before this change.)
+
+What `-File` rejects: it makes an argument after the script path that begins with `-`
+a parameter, and one whose name comes out empty fails in PowerShell before the starter
+runs, with PowerShell's own "argument ... is not valid" message on stderr and exit 1,
+not a `getty-bun: ` line, so no reading of the argument vector can recover it: a dash
+followed by `:` (`-:foo`) or by nothing but blanks, and in Windows PowerShell 5.1 also a
+lone `-`; pwsh 7 takes a lone `-` as a plain argument. 5.1 is what the Git Bash
+forwarding, the polyglot and a Codex `commandWindows` line call, so an entry that runs on
+Windows takes none of these. (Source-checked: PowerShell v6.0.0 and master,
+`CommandLineParameterParser.cs`, with `Parameter.cs` and
+`MergedCommandParameterMetadata.cs`; `getty-bun.ps1`, the comment above `Get-Arguments`.
+The 5.1 failure: executed, CI 46027293350, where the Windows PowerShell 5.1 leg failed
+with an argument list containing a lone `-`; each token on its own: pending the next CI
+run.)
 
 **Limit: no console of its own.** Bun starts with `CreateNoWindow`, so no console
 window opens for a hook. The trade-off: Ctrl+C in the host's console does not reach
