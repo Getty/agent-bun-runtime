@@ -1,0 +1,21 @@
+---
+class: standard
+completed: 2026-11-27T17:29:09Z
+created: 2026-11-27T14:14:20Z
+id: 49
+priority: high
+started: 2026-11-27T14:15:51Z
+status: done
+tags:
+- bootstrap
+- posix
+- release-0.2.0
+title: 'POSIX starter: slot-first target on x64, no byte-wise /proc/cpuinfo read'
+updated: 2026-11-27T17:29:09Z
+---
+
+Release 0.2.0 (hub card agent-developer k14). Spec: docs/plan.md "Release 0.2.0", ADR 0011. Item 1. has_avx2 reads /proc/cpuinfo byte-wise on every run: ~26 ms of 39 ms per hook on agent-lab (loadguard G14 P2, agent-irc L9 3.4). Take the first existing slot of <os>-x64, <os>-x64-baseline like getty-bun.ps1; detect only when neither exists. Goal: starter cost near the 5-6 ms of docs/hook-cost.md.
+
+2026-11-27 15:41 Committed cd5edfe (starter), tests 65237bd, docs 4965637; pushed to next-0.2.0. Starter cost over Bun: 28 ms -> 4 ms (measure-hook 20, agent-lab). Local review approved; CI gate pending.
+
+Commits on next-0.2.0: cd5edfe, 65237bd, 120d9d4. CI 46040193580 green on 30401e0; reviewers approved; merge into main pending owner
