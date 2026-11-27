@@ -1,0 +1,18 @@
+---
+class: standard
+completed: 2026-11-27T19:49:10Z
+created: 2026-11-27T18:08:51Z
+id: 68
+priority: medium
+started: 2026-11-27T18:09:14Z
+status: done
+tags:
+- ci
+- release-0.2.0
+title: 'CI: zsh on the linux-x64 scenarios leg'
+updated: 2026-11-27T19:49:10Z
+---
+
+0.2.0 rework after the hub review (hub card agent-developer k14). R11: the six zsh polyglot rows skipped on linux-x64 (job 140645671115). Workflow commit via the hub push file.
+
+Commits on next-0.2.0: dce4797. CI 46058085048 green on 5ac9528; reviewers approved; merge into main pending owner
