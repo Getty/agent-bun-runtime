@@ -1,0 +1,20 @@
+---
+class: standard
+completed: 2026-11-27T17:29:42Z
+created: 2026-11-27T14:14:31Z
+id: 53
+priority: high
+started: 2026-11-27T14:16:15Z
+status: done
+tags:
+- sdk
+- release-0.2.0
+title: 'SDK: onFailure silent'
+updated: 2026-11-27T17:29:42Z
+---
+
+Release 0.2.0 (hub card agent-developer k14). Spec: docs/plan.md "Release 0.2.0", ADR 0011. Item 7. loadguard L1/G1: broken input ends with exit 0, empty stdout, one stderr line.
+
+2026-11-27 15:41 Committed d9f4913 (src, tests, README, sdk.md); pushed. Local: 667 pass, gate 40/0.
+
+Commits on next-0.2.0: d9f4913. CI 46040193580 green on 30401e0; reviewers approved; merge into main pending owner
