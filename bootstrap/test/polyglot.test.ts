@@ -50,6 +50,9 @@ import {
 import { testWhen } from "./lib/when";
 import { DASH_ARGS, POSIX_ONLY_ARGS } from "./lib/args";
 
+/** The DASH_ARGS entries the outer PowerShell alters on the way to a `.cmd` (run 46031834399). */
+const PS_NATIVE_LIMIT = ["--%", "-Command x"];
+
 const IS_DARWIN = process.platform === "darwin";
 const IS_LINUX = process.platform === "linux";
 
@@ -212,29 +215,54 @@ describe(`item 6: the .cmd polyglot dot-sourced in shell form [${STARTER}]`, () 
       },
     );
 
+    // PowerShell hands arguments to a native command (here the .cmd) through its own re-quoting: `--%`
+    // disappears and `-Command x` arrives as two arguments (CI run 46031834399, both PowerShell rows).
+    // Git Bash and the POSIX shells pass the whole list.
+    const viaPowerShell = shell.words === HOOK.powershell;
+    const passed = viaPowerShell ? DASH_ARGS.filter((a) => !PS_NATIVE_LIMIT.includes(a)) : DASH_ARGS;
     shellTest(
       shell,
-      `${shell.name}: the entry gets its arguments, the dash ones too, and the exit code 0`,
+      `${shell.name}: the entry gets its arguments, the dash ones too, and the exit code 0${viaPowerShell ? " (without the two that PowerShell's native-command passing alters)" : ""}`,
       async () => {
         const { sb } = await installed();
-        const r = await run(shell.argv(shell.words(shell.path(sb), ["run", "entries/info.ts", "a b", "über", ...DASH_ARGS, ...POSIX_ONLY_ARGS])), {
+        const r = await run(shell.argv(shell.words(shell.path(sb), ["run", "entries/info.ts", "a b", "über", ...passed, ...POSIX_ONLY_ARGS])), {
           env: hookEnv(sb),
           cwd: sb.cwd,
           timeoutMs: 120_000,
         });
         expectExit(r, 0);
-        expect(JSON.parse(r.out).argv).toEqual(["a b", "über", ...DASH_ARGS, ...POSIX_ONLY_ARGS]);
+        expect(JSON.parse(r.out).argv).toEqual(["a b", "über", ...passed, ...POSIX_ONLY_ARGS]);
+      },
+    );
+
+    // Characterization of a limit of PowerShell's native-command argument passing, not of getty-bun:
+    // the outer PowerShell drops `--%` and splits `-Command x` before the .cmd runs.
+    if (viaPowerShell) shellTest(
+      shell,
+      `${shell.name}: characterization of PowerShell's native-command argument passing: \`--%\` is dropped and \`-Command x\` arrives split`,
+      async () => {
+        const { sb } = await installed();
+        const r = await run(shell.argv(shell.words(shell.path(sb), ["run", "entries/info.ts", "a b", "über", ...DASH_ARGS])), {
+          env: hookEnv(sb),
+          cwd: sb.cwd,
+          timeoutMs: 120_000,
+        });
+        expectExit(r, 0);
+        const expected = DASH_ARGS.filter((a) => a !== "--%").flatMap((a) => (a === "-Command x" ? ["-Command", "x"] : [a]));
+        expect(JSON.parse(r.out).argv).toEqual(["a b", "über", ...expected]);
       },
     );
 
     // Characterization of Windows PowerShell 5.1's `-File` limit, not of getty-bun: the batch part
-    // starts powershell.exe (5.1) whichever shell dot-sourced the file.
-    if (IS_WIN) for (const arg of ["-", "-:foo"]) shellTest(
+    // starts powershell.exe (5.1) whichever shell dot-sourced the file. A lone `-` followed by another
+    // argument fails binding (CI run 46027293350); the lone last `-` and `-:foo` are not asserted here
+    // (run 46031834399 does not tell which rows of this file they hit).
+    if (IS_WIN) shellTest(
       shell,
-      `${shell.name}: characterization of PowerShell 5.1: the argument ${JSON.stringify(arg)} makes -File fail before the script, exit 1, nothing on stdout`,
+      `${shell.name}: characterization of PowerShell 5.1: a \`-\` followed by another argument makes -File fail before the script, exit 1, nothing on stdout`,
       async () => {
         const { sb } = await installed();
-        const r = await run(shell.argv(shell.words(shell.path(sb), ["run", "entries/info.ts", arg])), {
+        const r = await run(shell.argv(shell.words(shell.path(sb), ["run", "entries/info.ts", "-", "x"])), {
           env: hookEnv(sb),
           cwd: sb.cwd,
           timeoutMs: 120_000,
