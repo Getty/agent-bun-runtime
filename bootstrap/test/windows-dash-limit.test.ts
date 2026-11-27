@@ -66,6 +66,8 @@ if (IS_WIN) {
       test("Windows PowerShell 5.1: the argument `-:foo` passes -File, exit 0 (not rejected as on pwsh 7)", async () => {
         const sb = await installed();
         const r = await starter(sb, ["run", "entries/info.ts", "-:foo"]);
+        // Exit 0 only: runs 46031834399 and 46035250753 were green here, but the entry's argv was not
+        // observed, so it is not asserted that it is exactly ["-:foo"].
         expectExit(r, 0);
       });
     }

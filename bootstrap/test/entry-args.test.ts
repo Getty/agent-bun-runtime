@@ -1,5 +1,5 @@
 // Release 0.2.0 item 4: every entry argument reaches the entry byte for byte, also the ones that
-// begin with `-`: `-x`, `-x:foo`, `--`, `-`, `--%`, `-File`, `-Command x` (skilletor F4). Until
+// begin with `-`: `-x`, `-x:foo`, `--`, `-` (POSIX only), `--%`, `-File`, `-Command x` (skilletor F4). Until
 // 0.2.0 getty-bun.ps1 started with `-File`, so PowerShell's parameter binding took arguments
 // that begin with `-` for its own. The rule "entry arguments never begin with `-`" is withdrawn.
 //

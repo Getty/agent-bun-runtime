@@ -50,7 +50,7 @@ import {
 import { testWhen } from "./lib/when";
 import { DASH_ARGS, POSIX_ONLY_ARGS } from "./lib/args";
 
-/** The DASH_ARGS entries the outer PowerShell alters on the way to a `.cmd` (run 46031834399). */
+/** The DASH_ARGS entries lost or split, observed through the polyglot from a PowerShell hook shell (run 46031834399); where it happens is not checked. */
 const PS_NATIVE_LIMIT = ["--%", "-Command x"];
 
 const IS_DARWIN = process.platform === "darwin";
@@ -215,8 +215,8 @@ describe(`item 6: the .cmd polyglot dot-sourced in shell form [${STARTER}]`, () 
       },
     );
 
-    // PowerShell hands arguments to a native command (here the .cmd) through its own re-quoting: `--%`
-    // disappears and `-Command x` arrives as two arguments (CI run 46031834399, both PowerShell rows).
+    // Observed through the polyglot from a PowerShell hook shell (CI run 46031834399, both PowerShell rows): `--%`
+    // disappears and `-Command x` arrives as two arguments. Where that happens is not checked (the cmd.exe row passes no arguments).
     // Git Bash and the POSIX shells pass the whole list.
     const viaPowerShell = shell.words === HOOK.powershell;
     const passed = viaPowerShell ? DASH_ARGS.filter((a) => !PS_NATIVE_LIMIT.includes(a)) : DASH_ARGS;
@@ -235,8 +235,8 @@ describe(`item 6: the .cmd polyglot dot-sourced in shell form [${STARTER}]`, () 
       },
     );
 
-    // Characterization of a limit of PowerShell's native-command argument passing, not of getty-bun:
-    // the outer PowerShell drops `--%` and splits `-Command x` before the .cmd runs.
+    // Characterization of what is observed through the polyglot from a PowerShell hook shell, not of getty-bun:
+    // `--%` is dropped and `-Command x` is split; where that happens is not checked (the cmd.exe row passes no arguments).
     if (viaPowerShell) shellTest(
       shell,
       `${shell.name}: characterization of PowerShell's native-command argument passing: \`--%\` is dropped and \`-Command x\` arrives split`,

@@ -793,8 +793,8 @@ export async function snapshot(dir: string): Promise<string[]> {
 }
 
 /**
- * A `snapshot(<home>/runtimes)` without the one file getty-bun.ps1 documents creating in `run` and
- * `ensure` (contract.md, "Bun without the project"): the empty `bun/.config/bunfig.toml` that is
+ * A `snapshot(<home>/runtimes)` without the one file getty-bun.ps1 documents creating in `run`,
+ * `ensure` and the `run-ready` mismatch case (contract.md, "Bun without the project"): the empty `bun/.config/bunfig.toml` that is
  * Bun's `--config`. getty-bun.sh uses /dev/null and creates nothing, so there the lines stay and
  * any such entry still fails. Only exactly that directory and that empty file are dropped; anything
  * else under `.config/` is still reported. For claims about the slot and the install, not about
