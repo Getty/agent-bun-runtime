@@ -74,7 +74,7 @@ CI 45883791115.)
 |---|---|---|
 | `codec` | required | `codex` or `claudeCode` |
 | `handler` | required | `(context) => effect \| effect[]`, sync or async |
-| `onFailure` | `"open"` | `"open"`: failures exit 1, the host goes on. `"closed"`: failures exit 2, a block on `PreToolUse` and `UserPromptSubmit`, and an action on other events (on `Stop` and `SubagentStop` the agent keeps working). Only an entry that serves nothing but `PreToolUse` or `UserPromptSubmit` picks `"closed"`, as a guard that must not let a tool or prompt through when it fails; any other entry keeps `"open"`, and a guard gets its own entry or hook command. `main()` sees only the current event and does not check this. Anything else: `INTERNAL_ERROR`, exit 1, before stdin is read |
+| `onFailure` | `"open"` | `"open"`: failures exit 1, the host goes on. `"closed"`: failures exit 2, a block on `PreToolUse` and `UserPromptSubmit`, and an action on other events (on `Stop` and `SubagentStop` the agent keeps working). Only an entry that serves nothing but `PreToolUse` or `UserPromptSubmit` picks `"closed"`, as a guard that must not let a tool or prompt through when it fails; any other entry keeps `"open"`, and a guard gets its own entry or hook command. `main()` sees only the current event and does not check this. `"silent"`: failures exit 0 with nothing on stdout, for a guard that must stay invisible on broken input (see [below](#exit-codes-and-failure-policy)). Anything else: `INTERNAL_ERROR`, exit 1, before stdin is read |
 | `maxInputBytes` | `DEFAULT_MAX_INPUT_BYTES` (1 MiB) | Bound for the hook object. It applies before the event is known: an event that needs a larger bound (big `Write` or `PostToolUse` payloads) gets its own hook command with an argument the entry maps to a larger value |
 | `stdin`, `stdout`, `stderr`, `env`, `cwd` | the real process | Injection for tests ([Testing](#testing)) |
 
@@ -134,6 +134,7 @@ effect lists encode; trust those tables over this one. Malformed effects are
 | Exit | When | stdout | stderr |
 |---|---|---|---|
 | 0 | The effect was encoded and written | The hook JSON and LF; nothing for `no-decision` | Nothing from the SDK |
+| 0 | Any failure with `onFailure: "silent"` | Nothing | `agent-bun-runtime: <CODE>: <message>` |
 | 1 | Any failure with `onFailure: "open"` | Nothing | `agent-bun-runtime: <CODE>: <message>` |
 | 2 | Any failure with `onFailure: "closed"` | Nothing | The same line |
 
@@ -145,6 +146,17 @@ also blocks `PreCompact`, `ConfigChange` and more on it, so `"closed"` stays on 
 that serve only `PreToolUse` or `UserPromptSubmit`. How each host shows
 exit 1 and 2 per event: [codex.md](codex.md), [claude-code.md](claude-code.md). Codex
 discards stdout and stderr of a failed start hook, so the line shows only in a manual run.
+
+`"silent"` is for a guard that must stay invisible on broken input (an empty, truncated or
+changed host payload), where exit 1 would make the host show a hook error on every call.
+A failure exits 0 with nothing on stdout, the bytes a `no-decision` ends with, so the host
+goes on as if the entry had decided nothing. The trade-off: the failure is visible only
+where the host logs a hook's stderr, and a guard on `PreToolUse` or `UserPromptSubmit`
+lets the tool call or prompt through without a word. A guard that must block when it
+fails picks `"closed"` instead. One exception to "nothing on stdout": an `OUTPUT_FAILED`
+under `"silent"` also exits 0, even when part of the hook JSON already reached stdout, so
+the host can read a truncated object after a successful exit (source-checked,
+`src/main.ts`).
 
 ## stdin and stdout
 
@@ -202,7 +214,7 @@ test("PreToolUse: rm -rf is denied with a reason", async () => {
 
 - Record fixtures from the real host and name the host version they came from; an
   invented payload tests your assumption, not the host. Cover each event you wire, one
-  malformed payload (exit 1 or 2 with one stderr line), and each effect's rejection on
+  malformed payload (exit 1, 2 or, with `"silent"`, 0 with one stderr line), and each effect's rejection on
   an event the codec does not support.
 - Pass `env` and `cwd`: without them the test runner's `process.env` and
   `process.cwd()` reach the handler.

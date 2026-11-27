@@ -59,6 +59,8 @@ function scratchTree() {
     "bootstrap/versions.json",
     ...STARTERS.map((s) => `bootstrap/${s}`),
     ...STARTERS.map((s) => `${NJK_REL}/${s}.njk`),
+    "bootstrap/getty-bun.cmd",
+    `${NJK_REL}/getty-bun.cmd`,
   ];
   for (const f of files) {
     mkdirSync(join(root, f, ".."), { recursive: true });
@@ -295,6 +297,21 @@ if (NJK_DIR) {
         expect(render(s, { bun_version: v })).toBe(replaceBlock(starter, read(starter), renderBlock(REAL_TABLE, v)));
       });
     }
+
+    // Release 0.2.0 item 7: vars.bun_platforms adds the `# platforms` line; without it the block is as before
+    test(`${s}.njk renders vars.bun_platforms to the starter with that platforms line, byte for byte`, () => {
+      const starter = join(REPO, "bootstrap", s);
+      for (const platforms of [["linux", "darwin"], ["windows"], ["linux", "darwin", "windows"]]) {
+        const want = replaceBlock(starter, read(starter), renderBlock(REAL_TABLE, "1.4.5", platforms));
+        expect(want).toContain(`# platforms ${platforms.join(" ")}\n`);
+        expect(render(s, { bun_version: "1.4.5", bun_platforms: platforms })).toBe(want);
+      }
+    });
+
+    test(`${s}.njk fails the render for a platform that is not linux, darwin or windows`, () => {
+      expect(() => render(s, { bun_version: "1.4.5", bun_platforms: ["linux", "plan9"] })).toThrow();
+      expect(() => render(s, { bun_version: "1.4.5", bun_platforms: ["Linux"] })).toThrow();
+    });
 
     test(`${s}.njk renders for 1.4.5 to the committed starter, byte for byte`, () => {
       expect(render(s, { bun_version: "1.4.5" })).toBe(read(join(REPO, "bootstrap", s)));

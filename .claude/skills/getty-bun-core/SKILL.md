@@ -37,8 +37,9 @@ windows-developer hub); this machine has no PowerShell.
 ## Tooling on this machine
 
 No Bun, no `pwsh`, no `shellcheck` installed (2026-11-25). The harness Bun is
-`.dev/harness/bun` (this host has no AVX2: the `linux-x64-baseline` build, checked against
-`bootstrap/versions.json`); if it is missing, fetch the pinned archive into a fresh
+`.dev/harness/bun` (a link to the main checkout's harness; the `linux-x64-baseline` build, checked against
+`bootstrap/versions.json`; agent-lab does have AVX2, and in Bun 1.4.5 the x64 and
+x64-baseline binaries are byte-identical); if it is missing, fetch the pinned archive into a fresh
 directory under `.dev/`, check its SHA256 against the table and extract `bun` there.
 `.dev/` is gitignored. CI on GitHub Actions is the gate for Windows, arm64 and
 `shellcheck`; a pwsh 7 for Linux under `.dev/` (run with `HOME` and the XDG dirs in a temp
@@ -56,7 +57,10 @@ GETTY_BUN_TEST_STARTER=sh .dev/harness/bun test bootstrap/test   # scenarios plu
 dash -n bootstrap/getty-bun.sh
 ```
 
-Run the suite once more with `sh` resolving to `busybox sh`. CI (`.github/workflows/ci.yml`)
+Run the suite once more with `sh` resolving to `busybox sh` only with a BusyBox whose
+applets do not shadow `unzip` and `uname` on PATH; Debian's `busybox-static` does, and
+the installs fail there (card `k60`). The polyglot rows take BusyBox from
+`GETTY_BUN_TEST_BUSYBOX`. CI (`.github/workflows/ci.yml`)
 adds `shellcheck`, the `ubuntu-24.04-arm` leg, the Windows legs with
 `GETTY_BUN_TEST_STARTER=powershell` and `pwsh`, the real download
 (`GETTY_BUN_TEST_REAL=1`) and the per-hook cost (`bootstrap/test/measure-hook.ts`).

@@ -3,7 +3,6 @@
 // Nothing here touches the real ~/.getty: every sandbox sets GETTY_HOME, HOME and
 // USERPROFILE to directories under one fresh temporary directory.
 
-import { afterEach } from "bun:test";
 import {
   cp,
   mkdir,
@@ -18,8 +17,10 @@ import { existsSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 // Path comparison lives in lib/paths.ts: a module with no test hooks, so paths.test.ts can
-// import it without registering this file's afterEach (which must attach to scenarios.test.ts).
+// import it without loading the rest of this file.
 export { canonPath, samePath } from "./paths";
+export { targetsFor } from "./targets";
+import { targetsFor } from "./targets";
 import { archiveInfo, loadRealTable, tableWith, type Table } from "./table";
 
 export const IS_WIN = process.platform === "win32";
@@ -41,17 +42,18 @@ export function starterKind(): StarterKind {
 }
 export const STARTER = starterKind();
 export const STARTER_FILE = STARTER === "sh" ? "getty-bun.sh" : "getty-bun.ps1";
+export const POLYGLOT_FILE = "getty-bun.cmd";
 
 /** Targets the starter may detect on this host; the fixture server offers all of them. */
 export function hostTargets(): string[] {
-  const arch = process.arch;
-  if (process.platform === "linux") {
-    if (arch === "x64") return ["linux-x64", "linux-x64-baseline"];
-    if (arch === "arm64") return ["linux-aarch64"];
-  }
-  if (process.platform === "win32" && arch === "x64") return ["windows-x64", "windows-x64-baseline"];
-  throw new Error(`bootstrap suite: unsupported host ${process.platform}/${arch} (MVP targets only)`);
+  const t = targetsFor(process.platform, process.arch);
+  if (t === null) throw new Error(`bootstrap suite: unsupported host ${process.platform}/${process.arch} (no starter target)`);
+  return t;
 }
+
+/** The platform word of the pin block's `# platforms` line for this host. */
+export const HOST_PLATFORM: "linux" | "darwin" | "windows" =
+  process.platform === "win32" ? "windows" : process.platform === "darwin" ? "darwin" : "linux";
 
 export const UMLAUTS = "Grüße äöü ß 日本語 €\n";
 
@@ -77,41 +79,211 @@ export async function fixtureArchive(target: string): Promise<Uint8Array> {
 
 export const archivePath = (version: string, target: string) => `/bun-v${version}/bun-${target}.zip`;
 
+export interface RequestRecord {
+  path: string;
+  method: string;
+  /** the Range header as received, or null */
+  range: string | null;
+  status: number;
+}
+
 export interface FixtureServer {
   url: string;
   counts: Map<string, number>;
+  /** every request in order, with the Range header the client sent */
+  requests: RequestRecord[];
   total(): number;
   count(path: string): number;
   /** requests for any archive (".zip") */
   archives(): number;
+  /** archive body bytes handed to clients (a cut response counts what it sent before the cut) */
+  bytesServed(): number;
+  /** resolves once `n` responses have been cut (see ServerOptions.cut) */
+  cutReached(n?: number): Promise<void>;
   stop(): void;
 }
 
-export function startServer(
-  routes: Record<string, Uint8Array>,
-  opts: { delayMs?: number } = {},
-): FixtureServer {
+export interface ServerOptions {
+  delayMs?: number;
+  /**
+   * answer `Range: bytes=N-` with 206 and the rest, and with 416 (`Content-Range: bytes *` + `/len`,
+   * no body) when N is the archive's length or more, as a real server does (default: Range is
+   * ignored, 200, whole body)
+   */
+  ranges?: boolean;
+  /**
+   * Cut the first `requests` (default 1) archive responses after `afterBytes` body bytes: "stall"
+   * keeps the connection open and silent, "drop" ends the whole server with the body unfinished
+   * (a later request is refused; a test that goes on starts another server), "end" is a raw TCP
+   * server (Bun.serve cannot do this: it drops the declared Content-Length when a body closes
+   * early) that sends the headers with the whole length, `afterBytes` of the body and then closes
+   * the connection with a FIN, staying up (Windows PowerShell 5.1 can take that for the end of the
+   * file). A cut response announces the whole length it would have sent.
+   */
+  cut?: { afterBytes: number; mode: "stall" | "drop" | "end"; requests?: number };
+}
+
+/**
+ * The "end" cut: hand-written HTTP/1.1 over a Bun.listen socket. Every request is answered once
+ * and the connection closed; the first `cut.requests` archive responses stop after `afterBytes`
+ * body bytes with the full Content-Length announced.
+ */
+function startEndingServer(routes: Record<string, Uint8Array>, opts: ServerOptions): FixtureServer {
+  const cut = opts.cut!;
   const counts = new Map<string, number>();
+  const requests: RequestRecord[] = [];
+  let served = 0;
+  let cuts = 0;
+  const cutWaiters: Array<{ n: number; resolve: () => void }> = [];
+  const enc = new TextEncoder();
+  const server = Bun.listen<{ head: string }>({
+    hostname: "127.0.0.1",
+    port: 0,
+    socket: {
+      open(sock) {
+        sock.data = { head: "" };
+      },
+      data(sock, chunk) {
+        sock.data.head += Buffer.from(chunk).toString("latin1");
+        if (!sock.data.head.includes("\r\n\r\n")) return;
+        const lines = sock.data.head.split("\r\n");
+        const [method, target] = lines[0]!.split(" ") as [string, string];
+        const path = new URL(target, "http://x").pathname;
+        const range = lines.find((l) => /^range:/i.test(l))?.replace(/^range:\s*/i, "") ?? null;
+        counts.set(path, (counts.get(path) ?? 0) + 1);
+        const rec: RequestRecord = { path, method, range, status: 404 };
+        requests.push(rec);
+        sock.data.head = "";
+        const body = routes[path];
+        if (!body) {
+          sock.end(enc.encode("HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"));
+          return;
+        }
+        let start = 0;
+        let status = 200;
+        let extra = "";
+        const m = opts.ranges && range ? /^bytes=(\d+)-$/.exec(range) : null;
+        if (m && Number(m[1]) >= body.length) {
+          rec.status = 416;
+          sock.end(enc.encode(`HTTP/1.1 416 Range Not Satisfiable\r\ncontent-range: bytes */${body.length}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n`));
+          return;
+        }
+        if (m) {
+          start = Number(m[1]);
+          status = 206;
+          extra = `content-range: bytes ${start}-${body.length - 1}/${body.length}\r\n`;
+        }
+        rec.status = status;
+        const slice = body.subarray(start);
+        const cutting = path.endsWith(".zip") && cuts < (cut.requests ?? 1);
+        const sent = cutting ? slice.subarray(0, cut.afterBytes) : slice;
+        const head = `HTTP/1.1 ${status} ${status === 206 ? "Partial Content" : "OK"}\r\ncontent-type: application/zip\r\n${extra}content-length: ${slice.length}\r\nconnection: close\r\n\r\n`;
+        const out = Buffer.concat([enc.encode(head), sent]);
+        let at = 0;
+        const pump = () => {
+          while (at < out.length) {
+            const n = sock.write(out.subarray(at));
+            if (n <= 0) return; // backpressure: drain() calls again
+            at += n;
+          }
+          if (path.endsWith(".zip")) served += sent.length;
+          sock.end();
+          if (cutting) {
+            cuts++;
+            const mine = cuts;
+            for (const w of cutWaiters.filter((w) => w.n <= mine)) w.resolve();
+          }
+        };
+        (sock.data as { pump?: () => void }).pump = pump;
+        pump();
+      },
+      drain(sock) {
+        (sock.data as { pump?: () => void }).pump?.();
+      },
+    },
+  });
+  return {
+    url: `http://127.0.0.1:${server.port}`,
+    counts,
+    requests,
+    total: () => [...counts.values()].reduce((a, b) => a + b, 0),
+    count: (p) => counts.get(p) ?? 0,
+    archives: () => [...counts].filter(([p]) => p.endsWith(".zip")).reduce((a, [, n]) => a + n, 0),
+    bytesServed: () => served,
+    cutReached: (n = 1) => (cuts >= n ? Promise.resolve() : new Promise<void>((resolve) => cutWaiters.push({ n, resolve }))),
+    stop: () => server.stop(true),
+  };
+}
+
+export function startServer(routes: Record<string, Uint8Array>, opts: ServerOptions = {}): FixtureServer {
+  if (opts.cut?.mode === "end") return startEndingServer(routes, opts);
+  const counts = new Map<string, number>();
+  const requests: RequestRecord[] = [];
+  let served = 0;
+  let cuts = 0;
+  const cutWaiters: Array<{ n: number; resolve: () => void }> = [];
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     async fetch(req) {
       const path = new URL(req.url).pathname;
       counts.set(path, (counts.get(path) ?? 0) + 1);
+      const range = req.headers.get("range");
+      const rec: RequestRecord = { path, method: req.method, range, status: 404 };
+      requests.push(rec);
       const body = routes[path];
       if (!body) return new Response("not found", { status: 404 });
       if (opts.delayMs) await Bun.sleep(opts.delayMs);
-      return new Response(body as unknown as BodyInit, { // typing only: Uint8Array<ArrayBufferLike> vs BodyInit in @types/bun 1.3.0
-        headers: { "content-type": "application/zip", "content-length": String(body.length) },
-      });
+      let start = 0;
+      let status = 200;
+      const headers: Record<string, string> = { "content-type": "application/zip" };
+      const m = opts.ranges && range ? /^bytes=(\d+)-$/.exec(range) : null;
+      if (m && Number(m[1]) >= body.length) {
+        rec.status = 416;
+        return new Response(null, { status: 416, headers: { "content-range": `bytes */${body.length}` } });
+      }
+      if (m) {
+        start = Number(m[1]);
+        status = 206;
+        headers["content-range"] = `bytes ${start}-${body.length - 1}/${body.length}`;
+      }
+      const slice = body.subarray(start);
+      headers["content-length"] = String(slice.length);
+      rec.status = status;
+      const cut = opts.cut;
+      if (cut && path.endsWith(".zip") && cuts < (cut.requests ?? 1)) {
+        cuts++;
+        const sent = slice.subarray(0, cut.afterBytes);
+        const stream = new ReadableStream<Uint8Array>({
+          start(c) {
+            c.enqueue(sent);
+            served += sent.length;
+            const mine = cuts;
+            for (const w of cutWaiters.filter((w) => w.n <= mine)) w.resolve();
+            // drop: the server goes away with the body unfinished, which resets the connection
+            // (closing or erroring the stream would be logged by Bun or end it as a clean chunked body)
+            if (cut.mode === "drop") setTimeout(() => server.stop(true), 50);
+          },
+          pull() {
+            return new Promise(() => {}); // stall: nothing more, never ends; server.stop(true) closes it
+          },
+        });
+        return new Response(stream, { status, headers });
+      }
+      if (path.endsWith(".zip")) served += slice.length;
+      return new Response(slice as unknown as BodyInit, { status, headers }); // typing only: Uint8Array<ArrayBufferLike> vs BodyInit in @types/bun 1.3.0
     },
   });
   return {
     url: `http://127.0.0.1:${server.port}`,
     counts,
+    requests,
     total: () => [...counts.values()].reduce((a, b) => a + b, 0),
     count: (p) => counts.get(p) ?? 0,
     archives: () => [...counts].filter(([p]) => p.endsWith(".zip")).reduce((a, [, n]) => a + n, 0),
+    bytesServed: () => served,
+    cutReached: (n = 1) =>
+      cuts >= n ? Promise.resolve() : new Promise<void>((resolve) => cutWaiters.push({ n, resolve })),
     stop: () => server.stop(true),
   };
 }
@@ -147,23 +319,29 @@ export function tableForArchives(
 // ---------------------------------------------------------------------------------------
 // sandbox
 
+// Cleanup is the test file's own job (project hazard rule): importing this module registers
+// no hook. Every test file that imports it calls
+//
+//   afterEach(cleanupAll);
+//
+// at its top level; bun attaches that to the file it is called in. A registration made at
+// import time attaches to the first file that imports the module and leaves every other file's
+// sandboxes behind (k43: 46 getty-bun-test-* directories per full run). sandbox.test.ts runs
+// two files together and fails when one leaves a directory.
 const cleanups: Array<() => Promise<void> | void> = [];
 export function track(fn: () => Promise<void> | void): void {
   cleanups.push(fn);
 }
-try {
-  // under `bun test`; measure-hook.ts imports this file outside the runner and cleans up itself
-  afterEach(async () => {
-    while (cleanups.length) {
-      const fn = cleanups.pop()!;
-      try {
-        await fn();
-      } catch (e) {
-        console.warn(`[bootstrap-test] cleanup failed: ${e}`);
-      }
+export async function cleanupAll(): Promise<void> {
+  while (cleanups.length) {
+    const fn = cleanups.pop()!;
+    try {
+      await fn();
+    } catch (e) {
+      console.warn(`[bootstrap-test] cleanup failed: ${e}`);
     }
-  });
-} catch {}
+  }
+}
 
 async function rmTree(p: string): Promise<void> {
   await rm(p, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
@@ -188,7 +366,8 @@ export interface SandboxOptions {
   version?: string;
   /** mirror base URL; null = none set (real download) */
   mirror?: string | null;
-  /** starters to copy into the consumer (default both that exist) */
+  /** pin block `# platforms` line, rendered with render-pin.ts --platforms; default: none */
+  platforms?: string[];
   extraEnv?: Record<string, string>;
 }
 
@@ -236,6 +415,27 @@ try {
   process.exit(9);
 }
 `;
+// the long-lived stdio server entry kind (ADR 0011): a ready line with its pid, one reply per
+// request line, and its own exit code per cause (end of input 10, SIGINT 11, SIGTERM 12, SIGHUP 13)
+const ENTRY_SERVE = `let buf = "";
+const dec = new TextDecoder();
+const bye = (what, code) => { process.stdout.write("bye:" + what + "\\n", () => process.exit(code)); };
+process.on("SIGINT", () => bye("SIGINT", 11));
+process.on("SIGTERM", () => bye("SIGTERM", 12));
+process.on("SIGHUP", () => bye("SIGHUP", 13));
+process.stdout.write("ready:" + process.pid + "\\n");
+for await (const chunk of Bun.stdin.stream()) {
+  buf += dec.decode(chunk, { stream: true });
+  let i;
+  while ((i = buf.indexOf("\\n")) >= 0) {
+    process.stdout.write("reply:" + buf.slice(0, i) + ":\\u00fc\\n");
+    buf = buf.slice(i + 1);
+  }
+}
+bye("eof", 10);
+`;
+const ENTRY_CACHEVAR = `process.stdout.write(JSON.stringify({ cache: process.env.BUN_RUNTIME_TRANSPILER_CACHE_PATH ?? null }));
+`;
 const ENTRY_EMIT = `process.stdout.write(${JSON.stringify(UMLAUTS)});\n`;
 // the trivial hook entry of measure-hook.ts: JSON in, JSON out
 export const ENTRY_HOOK = `const input = JSON.parse(await Bun.stdin.text());
@@ -251,6 +451,7 @@ export async function sandbox(opts: SandboxOptions = {}): Promise<Sandbox> {
   const cwd = join(tmp, "cwd");
   await mkdir(userHome, { recursive: true });
   await mkdir(cwd, { recursive: true });
+  for (const d of Object.values(scopedDirs(tmp))) await mkdir(d, { recursive: true });
   await mkdir(join(root, "bootstrap"), { recursive: true });
   await mkdir(join(root, "entries"), { recursive: true });
   await writeFile(join(root, "entries", "echo.ts"), ENTRY_ECHO);
@@ -260,6 +461,10 @@ export async function sandbox(opts: SandboxOptions = {}): Promise<Sandbox> {
   await writeFile(join(root, "entries", "empty-write.ts"), ENTRY_EMPTYWRITE);
   await writeFile(join(root, "entries", "line.ts"), ENTRY_LINE);
   await writeFile(join(root, "entries", "hook.ts"), ENTRY_HOOK);
+  await writeFile(join(root, "entries", "serve.ts"), ENTRY_SERVE);
+  await writeFile(join(root, "entries", "cachevar.ts"), ENTRY_CACHEVAR);
+  // a non-bundled entry big enough for Bun's transpiler cache, which stores only 4 KB and more
+  await writeFile(join(root, "entries", "padded.ts"), `process.stdout.write("padded\\n");\n// padding: ${"x".repeat(6000)}\n`);
 
   if (!existsSync(join(BOOTSTRAP, STARTER_FILE))) {
     throw new Error(`starter under test is missing: ${join(BOOTSTRAP, STARTER_FILE)} (GETTY_BUN_TEST_STARTER=${STARTER})`);
@@ -273,9 +478,13 @@ export async function sandbox(opts: SandboxOptions = {}): Promise<Sandbox> {
       copied.push(dst);
     }
   }
+  // the polyglot carries no pin: copied unchanged, never rendered (ADR 0010); absent until the
+  // windows worker delivers it, which the polyglot tests then report
+  const polyglot = join(BOOTSTRAP, POLYGLOT_FILE);
+  if (existsSync(polyglot)) await cp(polyglot, join(root, "bootstrap", POLYGLOT_FILE));
   const table = opts.table ?? loadRealTable();
   const version = opts.version ?? REAL_VERSION;
-  if (copied.length > 0) await renderPin(tmp, table, version, copied);
+  if (copied.length > 0) await renderPin(tmp, table, version, copied, opts.platforms);
 
   const mirror = opts.mirror === undefined ? null : opts.mirror;
   const sb: Sandbox = { tmp, home, userHome, root, cwd, mirror, env: {} };
@@ -284,12 +493,21 @@ export async function sandbox(opts: SandboxOptions = {}): Promise<Sandbox> {
 }
 
 /** Render the pin of `version` from `table` into `files` with the posix worker's render. */
-export async function renderPin(tmp: string, table: Table, version: string, files: string[]) {
+export async function renderPin(tmp: string, table: Table, version: string, files: string[], platforms?: string[]) {
   const tablePath = join(tmp, "table.json");
   await writeFile(tablePath, JSON.stringify(table, null, 2));
   const r = await run(
-    [process.execPath, RENDER_SCRIPT, "--table", tablePath, "--version", version, ...files],
-    { env: cleanProcessEnv(), cwd: tmp, timeoutMs: 60_000 },
+    [
+      process.execPath,
+      RENDER_SCRIPT,
+      "--table",
+      tablePath,
+      "--version",
+      version,
+      ...(platforms ? ["--platforms", platforms.join(",")] : []),
+      ...files,
+    ],
+    { env: { ...cleanProcessEnv(), ...scopedDirs(tmp) }, cwd: tmp, timeoutMs: 60_000 },
   );
   if (r.code !== 0) {
     throw new Error(`pin render failed (exit ${r.code}): ${r.err}\n  ${RENDER_SCRIPT}`);
@@ -315,12 +533,25 @@ export function pathWithoutBun(): string {
     .join(delimiter);
 }
 
+/**
+ * Where a starter run may write caches and temporary files: all inside the sandbox, so Bun's
+ * default transpiler cache (XDG_CACHE_HOME, else HOME; on Windows LOCALAPPDATA, TEMP) never
+ * reaches the developer's real one (k43, windows reviewer on k40).
+ */
+function scopedDirs(tmp: string): Record<string, string> {
+  const scratch = join(tmp, "scratch-tmp");
+  return IS_WIN
+    ? { LOCALAPPDATA: join(tmp, "local-appdata"), TEMP: scratch, TMP: scratch }
+    : { XDG_CACHE_HOME: join(tmp, "xdg-cache"), TMPDIR: scratch };
+}
+
 export function buildEnv(sb: Sandbox, extra: Record<string, string> = {}): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {
     if (v === undefined) continue;
     const u = k.toUpperCase();
     if (u === "PATH" || u.startsWith("GETTY_") || u === "CODEX_HOME" || u === "BUN_INSTALL") continue;
+    if (u === "XDG_CACHE_HOME" || u === "LOCALAPPDATA" || u === "TEMP" || u === "TMP" || u === "TMPDIR") continue;
     env[k] = v;
   }
   env.PATH = pathWithoutBun();
@@ -328,6 +559,7 @@ export function buildEnv(sb: Sandbox, extra: Record<string, string> = {}): Recor
   env.HOME = sb.userHome;
   env.USERPROFILE = sb.userHome;
   env.CODEX_HOME = join(sb.userHome, ".codex");
+  Object.assign(env, scopedDirs(sb.tmp));
   if (sb.mirror) env.GETTY_BUN_MIRROR = sb.mirror;
   return { ...env, ...extra };
 }
@@ -468,7 +700,7 @@ export interface StarterOptions {
 
 /**
  * Call the starter under test. Fails the test when the call timed out and, for every
- * command except `run` (whose exit code is the entry's), when it exited with 2.
+ * command except `run`, `run-ready` and `run-mcp` (whose exit code is the entry's), when it exited with 2.
  */
 export async function starter(sb: Sandbox, args: string[], o: StarterOptions = {}): Promise<RunResult> {
   const env: Record<string, string> = { ...sb.env };
@@ -490,7 +722,7 @@ export async function starter(sb: Sandbox, args: string[], o: StarterOptions = {
     timeoutMs: o.timeoutMs ?? 120_000,
   });
   if (r.timedOut) throw new Error(`starter ${args.join(" ")} timed out after ${r.ms | 0} ms\nstderr: ${r.err}`);
-  if (args[0] !== "run" && r.code === 2) {
+  if (args[0] !== "run" && args[0] !== "run-ready" && args[0] !== "run-mcp" && r.code === 2) {
     throw new Error(`starter ${args.join(" ")} exited 2 (a starter never exits 2)\nstderr: ${r.err}`);
   }
   return r;
@@ -560,6 +792,19 @@ export async function snapshot(dir: string): Promise<string[]> {
   return out;
 }
 
+/**
+ * A `snapshot(<home>/runtimes)` without the one file getty-bun.ps1 documents creating in `run`,
+ * `ensure` and the `run-ready` mismatch case (contract.md, "Bun without the project"): the empty `bun/.config/bunfig.toml` that is
+ * Bun's `--config`. getty-bun.sh uses /dev/null and creates nothing, so there the lines stay and
+ * any such entry still fails. Only exactly that directory and that empty file are dropped; anything
+ * else under `.config/` is still reported. For claims about the slot and the install, not about
+ * "nothing at all is created" (the miss cases keep the strict snapshot of the whole home).
+ */
+export function withoutConfigFile(lines: string[]): string[] {
+  if (STARTER === "sh") return lines;
+  return lines.filter((l) => l !== "bun/.config/" && l !== "bun/.config/bunfig.toml 0");
+}
+
 /** Whatever a failed install may leave: staging holds nothing. */
 export async function stagingLeft(sb: Sandbox): Promise<string[]> {
   return listDir(stagingDir(sb));
@@ -600,6 +845,16 @@ export async function install(sb: Sandbox): Promise<StatusJson> {
 // ---------------------------------------------------------------------------------------
 // the lock, held by a fixture process of the test (never by the starter)
 
+/**
+ * What takes the lock for a fixture process. The starter's lock is flock(2): `flock(1)` on Linux,
+ * and on macOS (no flock(1)) the perl that ships there takes the same lock. The fixture uses the
+ * same primitive as the starter on each platform; GETTY_BUN_TEST_LOCK_TOOL=perl makes a Linux run
+ * use the macOS one, which is how the macOS fixture is checked on Linux.
+ */
+const LOCK_TOOL: "flock" | "perl" = process.platform === "darwin" || process.env.GETTY_BUN_TEST_LOCK_TOOL === "perl" ? "perl" : "flock";
+const PERL_HOLD = `use strict; use Fcntl qw(:flock); open(my $h, ">>", $ARGV[0]) or die "open: $!"; flock($h, LOCK_EX) or die "flock: $!"; $| = 1; print "locked $$\n"; sleep($ARGV[1]);`;
+const PERL_TRY = `use strict; use Fcntl qw(:flock); open(my $h, ">>", $ARGV[0]) or exit 2; exit(flock($h, LOCK_EX | LOCK_NB) ? 0 : 1);`;
+
 export interface LockHolder {
   release(): Promise<void>;
 }
@@ -612,6 +867,8 @@ export async function holdLock(file: string, seconds = 60): Promise<LockHolder> 
       `$f=[System.IO.File]::Open('${file.replace(/'/g, "''")}','OpenOrCreate','ReadWrite','None');` +
       `[Console]::Out.WriteLine('locked '+$PID);[Console]::Out.Flush();Start-Sleep -Seconds ${seconds};$f.Dispose()`;
     cmd = ["powershell", "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", ps];
+  } else if (LOCK_TOOL === "perl") {
+    cmd = ["perl", "-e", PERL_HOLD, file, String(seconds)];
   } else {
     cmd = ["flock", file, "sh", "-c", `echo "locked $$"; exec sleep ${seconds}`];
   }
@@ -666,7 +923,9 @@ export async function tryLock(file: string): Promise<{ code: number | null; err:
         "powershell", "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command",
         `try{$f=[System.IO.File]::Open('${file.replace(/'/g, "''")}','OpenOrCreate','ReadWrite','None');$f.Dispose();exit 0}catch{exit 1}`,
       ]
-    : ["flock", "-n", file, "true"];
+    : LOCK_TOOL === "perl"
+      ? ["perl", "-e", PERL_TRY, file]
+      : ["flock", "-n", file, "true"];
   const r = await run(cmd, { env: cleanProcessEnv(), timeoutMs: 30_000 });
   return { code: r.code, err: r.err };
 }
@@ -712,4 +971,251 @@ export async function fakeBunDir(sb: Sandbox): Promise<{ dir: string; marker: st
     await writeFile(join(dir, "bun"), `#!/bin/sh\necho called > '${marker}'\necho 0.0.0-fake\n`, { mode: 0o755 });
   }
   return { dir, marker };
+}
+
+// ---------------------------------------------------------------------------------------
+// planted slots: a published slot built by the test, for scenarios that need `ready` or
+// `mismatch` without a download (the x64 slot choice, run-ready)
+
+/** The receipt of README.md's canonical bytes, with the table's archive facts for `target`. */
+export function receiptText(version: string, target: string, verifiedAt = "2026-11-27T00:00:00Z"): string {
+  const e = archiveInfo(loadRealTable(), REAL_VERSION, target);
+  const zeros = "0".repeat(64);
+  return (
+    `{\n  "version": "${version}",\n  "target": "${target}",\n  "archiveSha256": "${e.sha256}",\n` +
+    `  "contractVersion": 1,\n  "archive": "${e.archive}",\n  "member": "${e.member}",\n` +
+    `  "binarySha256": "${zeros}",\n  "executable": "bin/${bunExe}",\n  "verifiedAt": "${verifiedAt}"\n}\n`
+  );
+}
+
+/**
+ * Publish a slot by hand. The fast path reads the receipt's first lines and checks that bin/bun
+ * is a non-empty executable file, never runs it, so the Bun of a planted slot is a script that
+ * names its target and echoes its arguments (POSIX) or a copy of the harness Bun (Windows,
+ * where a script cannot be a bun.exe; its execPath then names the slot). `receiptVersion`
+ * differs from `version` for a slot that does not match.
+ */
+export async function plantSlot(
+  sb: Sandbox,
+  target: string,
+  o: { version?: string; receiptVersion?: string } = {},
+): Promise<string> {
+  const version = o.version ?? REAL_VERSION;
+  const slot = slotDir(sb, version, target);
+  await mkdir(join(slot, "bin"), { recursive: true });
+  await writeFile(join(slot, "receipt.json"), receiptText(o.receiptVersion ?? version, target));
+  if (IS_WIN) {
+    await cp(process.execPath, slotBun(slot));
+  } else {
+    await writeFile(
+      slotBun(slot),
+      `#!/bin/sh\nprintf 'fake-bun:%s\\n' '${target}'\nfor a in "$@"; do printf 'arg:%s\\n' "$a"; done\n`,
+      { mode: 0o755 },
+    );
+  }
+  return slot;
+}
+
+/** Whether `out` (stdout of a run through a planted slot) came from the Bun of `target`. */
+export function ranTarget(out: string, target: string): boolean {
+  if (!IS_WIN) return out.split("\n").includes(`fake-bun:${target}`);
+  try {
+    return String(JSON.parse(out).execPath).replaceAll("\\", "/").toLowerCase().includes(`/${target}/bin/`);
+  } catch {
+    return false;
+  }
+}
+
+/** Whether this host's CPU has AVX2 (Linux: the flags line of /proc/cpuinfo); null when unknown. */
+export function hostHasAvx2(): boolean | null {
+  if (process.platform !== "linux") return null;
+  try {
+    const m = /^flags\s*:(.*)$/m.exec(require("node:fs").readFileSync("/proc/cpuinfo", "utf8"));
+    return m ? m[1]!.split(/\s+/).includes("avx2") : null;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------------------
+// a started process the test talks to (a long-lived stdio server), and process facts
+
+export interface Live {
+  pid: number;
+  proc: { exitCode: number | null; signalCode: string | null; exited: Promise<number> };
+  /** the next complete stdout line, without its newline; fails after timeoutMs */
+  readLine(timeoutMs?: number): Promise<string>;
+  write(s: string): void;
+  endInput(): void;
+  /** all stdout so far plus everything until the process closes stdout */
+  readAll(timeoutMs?: number): Promise<string>;
+  stderr(): string;
+  /** signal the one process this handle started: POSIX `kill(signal)`; Windows ends the tree (taskkill /T /F) */
+  kill(signal?: "SIGTERM" | "SIGKILL" | "SIGINT" | "SIGHUP"): void;
+  /** wait for the exit; returns the exit code (null: signal) */
+  exit(timeoutMs?: number): Promise<number | null>;
+}
+
+/** Start `cmd` with a pipe for stdin and read its stdout incrementally. Killed in cleanup. */
+export function startLive(cmd: string[], o: { env: Record<string, string>; cwd: string }): Live {
+  const proc = Bun.spawn({ cmd, env: o.env, cwd: o.cwd, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+  track(async () => {
+    // the process this test started, and what it started (found by parent PID while it lives):
+    // a red run must leave neither behind. No kill by name.
+    const kids = !IS_WIN && proc.exitCode === null && proc.signalCode === null ? descendantsOf(proc.pid) : [];
+    if (proc.exitCode === null && proc.signalCode === null) killTree(proc);
+    await Promise.race([proc.exited, Bun.sleep(5000)]);
+    killRecorded(kids);
+  });
+  const dec = new TextDecoder();
+  let buf = "";
+  let all = "";
+  let err = "";
+  let closed = false;
+  let wake: Array<() => void> = [];
+  const poke = () => {
+    const w = wake;
+    wake = [];
+    for (const f of w) f();
+  };
+  (async () => {
+    for await (const chunk of proc.stdout as unknown as AsyncIterable<Uint8Array>) {
+      const t = dec.decode(chunk, { stream: true });
+      buf += t;
+      all += t;
+      poke();
+    }
+    closed = true;
+    poke();
+  })();
+  (async () => {
+    for await (const chunk of proc.stderr as unknown as AsyncIterable<Uint8Array>) err += dec.decode(chunk, { stream: true });
+  })();
+  const waitFor = (cond: () => boolean, what: string, timeoutMs: number) =>
+    new Promise<void>((resolve, reject) => {
+      const t0 = Date.now();
+      const check = () => {
+        if (cond()) return resolve();
+        const left = timeoutMs - (Date.now() - t0);
+        if (left <= 0) return reject(new Error(`timed out after ${timeoutMs} ms waiting for ${what}; stdout so far ${JSON.stringify(all)}, stderr ${JSON.stringify(err)}`));
+        const timer = setTimeout(check, Math.min(left, 200));
+        wake.push(() => {
+          clearTimeout(timer);
+          check();
+        });
+      };
+      check();
+    });
+  return {
+    pid: proc.pid,
+    proc,
+    async readLine(timeoutMs = 60_000) {
+      await waitFor(() => buf.includes("\n") || closed, "a stdout line", timeoutMs);
+      const i = buf.indexOf("\n");
+      if (i < 0) throw new Error(`stdout closed before a line; stdout so far ${JSON.stringify(all)}, stderr ${JSON.stringify(err)}`);
+      const line = buf.slice(0, i);
+      buf = buf.slice(i + 1);
+      return line;
+    },
+    write(s) {
+      (proc.stdin as { write(x: string): number; flush(): void }).write(s);
+      (proc.stdin as { flush(): void }).flush();
+    },
+    endInput() {
+      (proc.stdin as { end(): void }).end();
+    },
+    async readAll(timeoutMs = 60_000) {
+      await waitFor(() => closed, "stdout to close", timeoutMs);
+      return all;
+    },
+    stderr: () => err,
+    kill(signal) {
+      if (IS_WIN || signal === undefined) killTree(proc);
+      else proc.kill(signal);
+    },
+    async exit(timeoutMs = 60_000) {
+      const r = await Promise.race([proc.exited.then(() => "exited" as const), Bun.sleep(timeoutMs).then(() => "timeout" as const)]);
+      if (r === "timeout") throw new Error(`process ${proc.pid} still running ${timeoutMs} ms after it should have ended; stdout ${JSON.stringify(all)}, stderr ${JSON.stringify(err)}`);
+      return proc.exitCode;
+    },
+  };
+}
+
+export interface ProcFact {
+  pid: number;
+  comm: string;
+  /** identity token: the same PID with another token is another process */
+  id: string;
+}
+
+/** Start identity of a process, or null when it is gone or a zombie. POSIX only. */
+export function procIdentity(pid: number): string | null {
+  const fs = require("node:fs") as typeof import("node:fs");
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+    const rest = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+    if (rest[0] === "Z") return null;
+    return rest[19] ?? "";
+  } catch {
+    // no /proc (macOS): ps
+    const r = Bun.spawnSync({ cmd: ["ps", "-o", "stat=,lstart=", "-p", String(pid)], stdout: "pipe", stderr: "ignore" });
+    const out = new TextDecoder().decode(r.stdout).trim();
+    if (r.exitCode !== 0 || out === "" || out.startsWith("Z")) return null;
+    return out;
+  }
+}
+
+/** The processes that descend from `pid` right now (children, grandchildren, ...), by ppid. POSIX only. */
+export function descendantsOf(pid: number): ProcFact[] {
+  const r = Bun.spawnSync({ cmd: ["ps", "-A", "-o", "pid=,ppid=,comm="], stdout: "pipe", stderr: "ignore" });
+  const kids = new Map<number, Array<{ pid: number; comm: string }>>();
+  for (const line of new TextDecoder().decode(r.stdout).split("\n")) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
+    if (!m) continue;
+    const ppid = Number(m[2]);
+    if (!kids.has(ppid)) kids.set(ppid, []);
+    kids.get(ppid)!.push({ pid: Number(m[1]), comm: m[3]!.trim() });
+  }
+  const out: ProcFact[] = [];
+  const queue = [pid];
+  while (queue.length) {
+    for (const k of kids.get(queue.shift()!) ?? []) {
+      const id = procIdentity(k.pid);
+      if (id === null) continue;
+      out.push({ pid: k.pid, comm: k.comm, id });
+      queue.push(k.pid);
+    }
+  }
+  return out;
+}
+
+/** Still the same process (not exited, not reused)? */
+export const stillRunning = (f: ProcFact) => procIdentity(f.pid) === f.id;
+
+/** SIGKILL the recorded processes that are still the same ones: only PIDs this test recorded. */
+export function killRecorded(list: ProcFact[]): void {
+  for (const f of list) {
+    if (!stillRunning(f)) continue;
+    try {
+      process.kill(f.pid, "SIGKILL");
+    } catch {}
+  }
+}
+
+/** Poll `cond` every 100 ms until it is true; fails with `what` after `timeoutMs`. */
+export async function pollUntil(cond: () => boolean | Promise<boolean>, timeoutMs: number, what: string): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await cond())) {
+    if (Date.now() > deadline) throw new Error(`timed out after ${timeoutMs} ms waiting for ${what}`);
+    await Bun.sleep(100);
+  }
+}
+
+/** Size of a file, or null when it does not exist. */
+export async function fileSize(p: string): Promise<number | null> {
+  try {
+    return (await stat(p)).size;
+  } catch {
+    return null;
+  }
 }

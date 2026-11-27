@@ -5,7 +5,7 @@
 //   bun test bootstrap/test                  the suite (never downloads from GitHub)
 //   GETTY_BUN_TEST_REAL=1 bun test ...       also the one test against the real release
 
-import { describe, expect, setDefaultTimeout, test } from "bun:test";
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -19,6 +19,7 @@ import {
   STARTER,
   UMLAUTS,
   archivePath,
+  cleanupAll,
   expectExit,
   failureLine,
   fakeBunDir,
@@ -56,6 +57,7 @@ import {
 } from "./lib/harness";
 
 setDefaultTimeout(300_000);
+afterEach(cleanupAll); // this file removes its own sandboxes, servers and holders
 
 const realTable = loadRealTable();
 

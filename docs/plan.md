@@ -7,7 +7,10 @@ at `0bc8218` (PR 2), gate green in CI run 45885263188. Phase 2b (the Claude Code
 the consumer skills and release 0.1.0, [ADR 0009](adr/0009-first-release-claude-code-and-consumer-skills.md))
 is complete: merged into `main` at `4f9c556` (PR 3) and `b577af7` (PR 4), gate green in
 CI runs 45907098883 (pull request) and 45908923306 (`main`), and released as 0.1.0 (tag
-`v0.1.0`, npm). Phase 3 onward is not implemented yet.
+`v0.1.0`, npm). Release 0.2.0 (what skilletor, loadguard and agent-irc need, section
+"Release 0.2.0" below, [ADR 0010](adr/0010-claude-code-on-windows-cmd-polyglot.md) and
+[ADR 0011](adr/0011-release-0.2.0-interface.md)) is being built on branch `next-0.2.0`.
+Phase 3 onward is not implemented yet; 0.2.0 takes the macOS part of phase 4.
 Source: [handoff/2026-11-25-bun-runtime-handoff.md](handoff/2026-11-25-bun-runtime-handoff.md).
 Where this plan and the handoff disagree, this plan wins; the deviations are listed below
 and recorded as ADRs in [adr/](adr/).
@@ -64,7 +67,7 @@ Everything else waits until a consumer asks for it.
    handoff's consumer dependency setup, consumer lock and binding move to phase 5, for
    the first consumer that cannot bundle.
 4. **One starter per OS, Windows from phase 1** ([ADR 0004](adr/0004-one-starter-per-os.md)).
-   POSIX `sh` for Linux (macOS later), PowerShell for Windows. Under Git Bash, MSYS or
+   POSIX `sh` for Linux (macOS from 0.2.0), PowerShell for Windows. Under Git Bash, MSYS or
    Cygwin the `sh` starter forwards to the PowerShell one, so a slot has exactly one lock
    implementation. Windows rules: skill `getty-bun-windows`.
 5. **Bootstrap is developed and tested here**, in `bootstrap/`, and delivered through the
@@ -87,7 +90,7 @@ Everything else waits until a consumer asks for it.
 | In | Out (later, when a consumer needs it) |
 |---|---|
 | Starter commands `run`, `ensure`, `status` | `repair`, `gc`, upgrade and rollback commands |
-| Targets `linux-x64`, `linux-x64-baseline`, `linux-aarch64`, `windows-x64`, `windows-x64-baseline` | musl, `windows-aarch64`, macOS |
+| Targets `linux-x64`, `linux-x64-baseline`, `linux-aarch64`, `windows-x64`, `windows-x64-baseline`; from 0.2.0 `darwin-x64`, `darwin-aarch64` | musl, `windows-aarch64`, `darwin-x64-baseline` |
 | Lock, staging, atomic publish, receipt, bounded wait | Retention, last-working binding |
 | Bundled consumer entry | `bun install --frozen-lockfile` on the user machine, consumer lock |
 | SDK: `main()`, context, typed errors, effects `no-decision`, `add-context`, `tool-permission`, `tool-input`, `notify-user`, combined effects, failure policy, the Codex and Claude Code codecs for the consumers' events | Dispatcher config, ready commands, Hermes codec, state, MCP |
@@ -110,9 +113,10 @@ getty-bun.ps1 <same commands>         identical behavior and exit codes
 - On Windows an entry's exit code is 0 to 255: Bun 1.4.5 itself exits with the low byte
   of the entry's code, and the starters pass on what Bun exits with (executed, CI
   45589361806; `bootstrap/README.md`, "Limit: exit codes through Git Bash").
-- Entry arguments must not begin with `-`: on Windows `-File` hands every argument after
-  the script path to PowerShell's own parameter binding, which may re-parse it
-  (`bootstrap/README.md`, "Limit: entry arguments").
+- Entry arguments pass through unchanged, those beginning with `-` included, from 0.2.0
+  (`getty-bun.ps1` reads its process's argument vector after `-File` instead of `$args`;
+  ADR 0011). 0.1.0 forbade them because `-File` hands every argument to PowerShell's
+  parameter binding. A lone `--` as the first entry argument is consumed by Bun itself.
 - The install lock is released before Bun starts, so an entry never holds it (scenario
   2b in `bootstrap/test/scenarios.test.ts`, executed on all four scenario legs, CI
   45603412444).
@@ -133,10 +137,11 @@ getty-bun.ps1 <same commands>         identical behavior and exit codes
 - Open difference from "identical behavior" (card `k19`): `getty-bun.ps1` probes the
   published `bun.exe` a second time after it has released the lock, and fails with exit 1
   if that probe does not pass, leaving the slot as published; the next call takes the
-  fast path (source-checked, `bootstrap/getty-bun.ps1:566-572`). `getty-bun.sh` and
+  fast path (source-checked, `bootstrap/getty-bun.ps1:675-681`). `getty-bun.sh` and
   `bootstrap/README.md` have no such second probe.
-- Target on the fast path: `getty-bun.sh` detects it on every call (`uname`,
-  `/proc/cpuinfo`). `getty-bun.ps1` on x64 does not detect the CPU: it takes the first
+- Target on the fast path: from 0.2.0 `getty-bun.sh` on x64 takes the first slot that exists
+  of `<os>-x64`, then `<os>-x64-baseline`, and reads `/proc/cpuinfo` only when neither
+  exists (before 0.2.0 it detected on every call). `getty-bun.ps1` on x64 does not detect the CPU: it takes the first
   slot that exists of `windows-x64`, then `windows-x64-baseline`; `ready` runs it,
   `mismatch` fails closed (a mismatching `windows-x64` slot is never skipped for a ready
   baseline one). Only when neither exists does it detect AVX2 (`IsProcessorFeaturePresent`
@@ -232,7 +237,7 @@ is in [README.md](../README.md), "The SDK".
 | 2 SDK MVP and Codex codec | Package, `main(): Promise<number>`, context, typed errors, Codex `SessionStart` and `SubagentStart`, bundling a consumer entry | `bun pm pack` tarball, bundled into a scratch consumer, runs through both starters offline |
 | 2b Claude Code codec, consumer skills, 0.1.0 | Starters ignore the project's Bun config (`k29`); Claude Code codec and the Codex events the consumers use; `tool-permission`, `tool-input`, `notify-user` with combined effects, failure policy; skills `getty-bun`, `getty-bun-integration`, `getty-bun-install` in `skills/`; release checklist | The phase 2 gate run from a hostile project directory, plus Claude Code payloads through both starters and a scratch plugin rendered from `getty-bun-install` whose starter runs a hook; all CI legs green; both reviewers |
 | 3a briefing on Codex | TypeScript port of briefing 0.6.0's Codex logic (`f7968f1`), hooks through the starter (`command` plus `commandWindows`), `.codex-plugin/plugin.json` back, CI | Real Codex (0.153.4 here) with isolated `HOME`, `CODEX_HOME` and `GETTY_HOME`: plugin install, hook trust, the first session installs Bun, a subagent receives its skills. Windows: a card on the windows-developer board |
-| 3b skilletor on getty-bun | Node replaced, render target for a plugin's `skills/`, the Claude Code adapter on Windows (open decision below) | skilletor's hooks run end to end in Claude Code and Codex, on Linux and Windows |
+| 3b skilletor on getty-bun | Node replaced, render target for a plugin's `skills/`, the Claude Code adapter on Windows (decided: [ADR 0010](adr/0010-claude-code-on-windows-cmd-polyglot.md)) | skilletor's hooks run end to end in Claude Code and Codex, on Linux and Windows |
 | 4 macOS | `lockf` or another lock primitive, `darwin` targets, CI `macos-latest` | The phase 1 scenarios on macOS |
 | 5 Grow on demand | Hermes codec, state backend, MCP companion, consumer dependency install with frozen lockfile and consumer lock | Handoff phases 4 and 5, only for what a consumer needs |
 | 6 Release and upgrade | Handoff phase 6 | Handoff release acceptance |
@@ -325,42 +330,157 @@ replaces the default `hooks/hooks.json` (source-checked, openai/codex `3f65e9f`,
 is not traced). briefing 0.6.0 already names `hooks/codex-hooks.json` in
 `.codex-plugin/plugin.json`.
 
+## Release 0.2.0
+
+Scope set by the owner on 2026-11-27 (hub card `agent-developer k14`), from the part A
+reports of the three consumers moving to getty-bun. One card per item on this
+repository's board; decisions in [ADR 0010](adr/0010-claude-code-on-windows-cmd-polyglot.md)
+and [ADR 0011](adr/0011-release-0.2.0-interface.md). The details below are what the
+starters, the SDK and the suites code against; a delivering task that finds one
+unworkable reports back instead of changing it.
+
+**Starters.**
+
+1. *Fast target.* `getty-bun.sh` on x64: the first slot that exists of `<os>-x64`, then
+   `<os>-x64-baseline` (`ready` runs it, `mismatch` fails closed, a mismatching `-x64` slot
+   is never skipped for a ready baseline one); CPU detection only when neither exists,
+   without a byte-wise `read` loop over `/proc/cpuinfo`. `status` with neither slot
+   reports `missing` and the detected target. Goal: the starter's own cost back near the
+   5–6 ms of [hook-cost.md](hook-cost.md) on Linux (loadguard measured 26 ms of 39 ms in
+   `has_avx2` on agent-lab).
+2. *Transpiler cache* (`k46`). Both starters export `BUN_RUNTIME_TRANSPILER_CACHE_PATH=0`
+   to Bun (the staging probe included) instead of unsetting it. Evidence: skilletor
+   part A §2.4 (Bun writes `@t@/*.pile` into the user's cache for a non-bundled entry;
+   93 conformance failures), loadguard P6 and agent-irc 3.4 (a `// @bun` bundle writes
+   nothing either way).
+3. *`run-ready <entry> [args...]`.* Slot `ready`: exactly `run`. `missing`: exit 0, nothing
+   on stdout, one stderr line
+   `getty-bun: Bun <version> <target> is not installed yet (<slot>); run-ready skipped <entry>`,
+   no lock, no staging, no download. `mismatch`, an invalid environment or an unsupported
+   target: as `run`. The x64 slot choice of item 1 applies. *No orphan download:* a starter
+   killed with SIGKILL during a download leaves no `curl`/`wget` it started running for
+   more than about two seconds. *Resume:* the archive downloads to
+   `<GETTY_HOME>/runtimes/bun/.downloads/<version>/<target>/<archive>.part`, only under the
+   install lock; an interrupted install (signal, kill, timeout, network error) keeps it,
+   the next install resumes it (HTTP range; a server that answers without one starts the
+   file over), and a checksum mismatch after the download deletes it before the failure.
+   Staging of the slot itself is unchanged. `getty-bun.ps1` follows (it downloads in
+   process, so it has no child to orphan).
+4. *`-` arguments in `getty-bun.ps1`* (skilletor F4). Every entry argument, also `-x`,
+   `-x:foo`, `--`, `-`, `--%` and `-File`, reaches the entry byte for byte when the starter
+   is started with `powershell.exe`/`pwsh` `-File` (Codex `commandWindows`), through the
+   Git Bash forwarding and through the polyglot (item 6). Then
+   `getty-bun-integration` `contract.md` ("Entry arguments never begin with `-`") is
+   rewritten to the rule that holds. Narrowed on 2026-11-27 after CI runs 46027293350 and
+   46031834399 (main session's decision): PowerShell's `-File` itself rejects some
+   arguments before the script runs (Windows PowerShell 5.1: a lone `-`; pwsh 7: `-:foo`),
+   so on Windows no lone `-` and nothing beginning with `-:`; through the polyglot from a
+   PowerShell hook shell the outer PowerShell also drops `--%` and splits an argument
+   that begins with `-` and contains a blank. Every other argument (`-x`, `-x:foo`, `--`,
+   `-File`, ...) is passed; `contract.md` holds the rule and its evidence.
+5. *macOS* (`k4`). Targets `darwin-x64` (`bun-darwin-x64.zip`) and `darwin-aarch64`
+   (`bun-darwin-aarch64.zip`) in `bootstrap/versions.json` for 1.4.5, their SHA256 checked
+   against the signed `SHASUMS256.txt.asc` (ADR 0005); `getty-bun.sh` detects them
+   (`uname -s` Darwin; a Rosetta shell on Apple silicon still selects `darwin-aarch64`),
+   locks with a primitive macOS ships (no `flock` there), hashes with `shasum -a 256`. No
+   `darwin-x64-baseline`: the macOS versions Bun 1.4.5 supports run only on Macs with
+   AVX2 (to be confirmed by the worker, else reported). CI legs on macOS for the
+   scenarios, the gate and the per-hook cost.
+6. *`.cmd` polyglot* ([ADR 0010](adr/0010-claude-code-on-windows-cmd-polyglot.md)).
+   `bootstrap/getty-bun.cmd`, delivered through `getty-bun-install` (no pin in it, so the
+   template copies it unchanged); Claude Code hook in shell form, dot-sourcing it. Checked
+   in the suite on Linux and macOS (the shells Claude Code uses there) and on the Windows
+   legs (PowerShell 5.1, 7, Git Bash).
+7. *Platforms.* `vars.bun_platforms` (a list of `linux`, `darwin`, `windows`; anything else
+   fails the render) adds one line `# platforms <p> [<p>...]` after `# version` in the pin
+   block of both starters; without it the block is unchanged. `render-pin.ts` takes the
+   same list. A starter whose platform (`linux`, `darwin`; `windows` for `getty-bun.ps1`
+   and the Git Bash forwarding) is not listed: `run`, `run-ready` and `ensure` exit 0,
+   nothing on stdout, one `getty-bun: ` line on stderr, no target detection, no download;
+   `status` prints `{"pin":"<v>","target":null,"slot":null,"state":"undeclared"}` and exits
+   0. The schema gets `platforms` (unique items from that enum, at least one); the
+   consumer's CI compares the line with `gettyBun.platforms` (`getty-bun-install`, "Check
+   the copy in CI").
+
+**SDK.** 8. `onFailure: "silent"`: every SDK failure (input, handler, effect, encoding)
+returns exit 0, writes nothing to stdout and the one `agent-bun-runtime: <CODE>: <message>`
+line to stderr. `"open"` (exit 1) stays the default, `"closed"` (exit 2) unchanged.
+
+**Contract and docs** (skills `getty-bun-integration`, `getty-bun`, `getty-bun-install`):
+9. the long-lived stdio server entry kind (ADR 0011) with a scenario in
+`bootstrap/test` (the starter execs Bun under the same PID; stdout carries only the
+entry's bytes, also during a first install; end of input and SIGINT, SIGTERM, SIGHUP
+reach the entry; exit code passes through); 10. MCP start under Codex in `codex.md` (no
+plugin root, no `CODEX_HOME` at the server, the locator belongs to the consumer); 11.
+detached long-lived children (session, nice, file descriptors, RSS) in
+`dependencies-and-execution.md`; 12. `k47` and `k48`.
+
+**Repository.** 13. `k43`; 14. the publish workflow for trusted publishing (npm CLI
+11.5.1 or later, Node 22.14.0 or later; 0.2.0 is its first publish, in the order of
+[release-0.1.0.md](release-0.1.0.md), "After the release"); 15.
+[release-0.2.0.md](release-0.2.0.md) with the consumers' move from `v0.1.0`.
+
+**Rework after the hub review** (2026-11-27, hub card `agent-developer k14`, review
+`abr-0.2.0.review.md` V1–V4, H1–H11, and the hub's Claude Code probe: every end of an MCP
+server before `initialize` completes, timeout or a quick exit 0 alike, blocks the server for
+about 15 minutes in Claude Code 2.1.332; the MCP start runs in parallel to `SessionStart`).
+
+*`run-mcp <entry> [args...]`* (`getty-bun.sh`), the starter mode for a long-lived stdio
+(MCP) server. The name follows `run-ready`: a `run` variant named after when it runs.
+
+- Slot `ready` and `<root>/<entry>` a readable regular file: exactly `run` (same `exec`,
+  PID, flags, environment).
+- Slot `missing`: no install of its own (no lock, staging or download). It waits for the
+  slot a `SessionStart` `ensure` is installing, polling the slot state about every 0.25 s,
+  for at most `GETTY_BUN_MCP_WAIT` seconds (whole number, default 20, below both hosts'
+  30 s); ready within the wait: `exec` as above.
+- Every other way (still missing after the wait, `mismatch`, an invalid `GETTY_HOME`,
+  `GETTY_BUN_LOCK_WAIT` or `GETTY_BUN_MCP_WAIT`, a missing or broken pin, an unsupported or
+  undeclared platform, a missing entry argument, a `<root>/<entry>` that is no readable
+  regular file once the slot is ready, after the wait too, where Bun would exit 1) never
+  ends before `initialize`. The starter writes one `getty-bun: ` line with the reason to
+  stderr and becomes a **stub server** (POSIX tools only, for example `awk`; no Bun):
+  - stdout carries only JSON-RPC, one message per line, flushed per line;
+  - every message with an `id` gets a response with that `id` verbatim (number or string;
+    Claude Code first sends `server/discover` with `"server-discover-probe-1"`); only the
+    top-level `id` and `method` count, an `"id"` inside `params` never does, whatever the
+    key order;
+  - `initialize`: `protocolVersion` as the client asked, `capabilities: {"tools": {}}`,
+    `serverInfo: {"name": "getty-bun-stub", "version": "<pin>"}`, `instructions` naming the
+    reason and that the server is there from the next session; `tools/list` →
+    `{"tools": []}`; `tools/call` → `{"content": []}`; `ping` → `{}`; anything else with an
+    `id` → error `-32601`; notifications get no response; a line it cannot read is
+    ignored;
+  - end of input → exit 0; a signal → it ends within 0.5 s, by that signal or with
+    128 + n; the first signal counts (two different signals at the same instant may be handled in
+    signal-number order). Signals during the wait end it the same way.
+- Windows: `getty-bun.ps1 run-mcp` (and the Git Bash forwarding) fails with one
+  `getty-bun: ` line, exit 1: MCP servers through the PowerShell starter belong to `k13`.
+- Consumers: server line `sh "${CLAUDE_PLUGIN_ROOT}/bootstrap/getty-bun.sh" run-mcp <entry>
+  <host>` plus the `SessionStart` `ensure` hook with timeout 600; session 1 has the real
+  server only if that install finishes within the wait. Codex: `env_vars: ["GETTY_HOME",
+  "GETTY_BUN_MIRROR"]` in the server declaration. The entry itself answers `initialize`
+  before doing anything that can fail.
+
+Staging cleanup (review H1) is card `k64`, for 0.3.0.
+
+Not in 0.2.0: the Hermes codec, MCP helpers in the SDK, a Windows MCP launcher and the job
+object (`k13`), `k28`.
+
 ## Open decisions (owner)
 
-- **Claude Code on Windows (before phase 3b).** Claude Code's `hooks.json` has no
-  per-OS field (documented: none among the command hook fields, none in the CHANGELOG),
-  so one entry must start on Linux and on Windows alike. Since Claude Code 2.1.139 a hook
-  with `args` runs in exec form, spawned without a shell (source-checked,
-  `anthropics/claude-code` `4cc5e8b`, `CHANGELOG.md`); without `args` it runs in shell
-  form, on Windows in Git Bash, or in PowerShell when Git Bash is not installed
-  (documented). Measured by windows-developer (`docs/hook-start-windows.md`, Claude Code
-  2.1.287), where Git Bash could not be hidden, so the PowerShell fallback was measured
-  with `"shell": "powershell"` as a stand-in; Windows without Git for Windows is not
-  measured:
-  - Windows-only entries start, such as the exec form `powershell -NoProfile
-    -ExecutionPolicy Bypass -File ...` (probe x9), but none serves Linux from the same
-    entry.
-  - Of the entries that start on Linux and on Windows from one `hooks.json`, two remain
-    without Git Bash: the exec form on an extensionless path with a `.exe` next to it
-    (probe y1), or a dot-sourced `.cmd` polyglot in shell form (probe q6 under the
-    stand-in), which pays a PowerShell start (~720 ms) per hook. Their Linux side was
-    not part of these probes.
-
-  Options: a tiny native shim (like winlaunch, built reproducibly with zig, x64 only)
-  that runs the slot's Bun directly and calls `getty-bun.ps1` only to install, or the
-  polyglot. A shim that starts Bun itself must read the pin block, detect the target
-  (AVX2) and check the fast path: a third reader of the pin block beside the two
-  starters, which today are the only things that select a version. That is part of this
-  decision. Decide with the per-hook cost measured in phase 1
-  ([hook-cost.md](hook-cost.md): on the CI runner the starter adds about 0.35–0.52 s over
-  Bun; under Codex' PowerShell nesting a hook takes about 0.5–0.79 s in total; real
-  desktops are slower).
+- **Claude Code on Windows** was decided on 2026-11-27: a dot-sourced `.cmd` polyglot in
+  shell form ([ADR 0010](adr/0010-claude-code-on-windows-cmd-polyglot.md)), see
+  "Decided". The measurements it rests on: windows-developer `docs/hook-start-windows.md`
+  (Claude Code 2.1.287; probes x9, y1, q6) and [hook-cost.md](hook-cost.md).
 - **Codex re-trust on updates.** The Codex docs say a plugin update that changes a
   bundled script needs a new hook review, even when the hook definition stays the same.
   Measure in phase 3a what counts as a bundled script (the starter, the entry, both).
 
 ## Decided
 
+- Claude Code on Windows: the `.cmd` polyglot, option (b) of skilletor F2, owner,
+  2026-11-27 ([ADR 0010](adr/0010-claude-code-on-windows-cmd-polyglot.md)).
 - Bun pin: 1.4.5 (latest stable, 2026-11-19), confirmed by the owner on 2026-11-25
   ([ADR 0005](adr/0005-bun-pin-and-version-table.md)).
 - Distribution of `@getty/agent-bun-runtime`: npm, public, Artistic-2.0

@@ -1,7 +1,8 @@
 # agent-bun-runtime: per-hook cost of the starters
 
 The phase 1 gate asks for the per-hook cost on Windows to be measured and recorded. The
-numbers also feed the open decision "Claude Code on Windows" in [plan.md](plan.md).
+numbers also fed the decision "Claude Code on Windows" in [plan.md](plan.md) (decided 2026-11-27,
+[ADR 0010](adr/0010-claude-code-on-windows-cmd-polyglot.md)).
 
 ## Method
 
@@ -76,6 +77,17 @@ of runs 2 and 3):
 - the exit code was 0;
 - nothing timed out;
 - stdout was byte-identical to the direct form.
+
+### macOS (0.2.0)
+
+The hub review of 0.2.0 (agent-developer, 2026-11-27) read the per-hook cost of the
+`macos-15-intel` leg (`darwin-x64`) of CI run 46040193580 at `30401e0`: about 17 ms for the
+starter over Bun. Suspected cause, not measured: on x86_64 macOS `getty-bun.sh` forks
+`/usr/sbin/sysctl` on every call to detect a Rosetta shell; native Apple silicon
+(`macos-15`) never runs it. Avoiding the fork with the Linux slot-first rule (take an
+existing `darwin-aarch64`, then `darwin-x64` slot, call `sysctl` only when neither exists)
+is card `k71`; it needs a new measurement on `macos-15-intel` to show whether `sysctl` is
+the cost.
 
 ## Reading
 

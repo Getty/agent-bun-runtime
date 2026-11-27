@@ -1,6 +1,58 @@
 Revision history for agent-bun-runtime
 
 {{$NEXT}}
+  - Linux x64: the starter takes the slot that already exists, linux-x64
+    first, then linux-x64-baseline, and detects the CPU only when neither
+    is installed.
+  - The starters set BUN_RUNTIME_TRANSPILER_CACHE_PATH=0, so Bun writes no
+    transpiler cache into the user's cache directory.
+  - New command run-mcp <entry> [args...] (POSIX starter) for long-lived
+    stdio (MCP) servers: runs like run when the pinned Bun is installed,
+    otherwise waits up to GETTY_BUN_MCP_WAIT seconds (default 20) for the
+    slot a SessionStart ensure installs. If there is still none, or
+    anything else fails, it prints one getty-bun line on stderr and serves
+    a stub MCP server without tools until end of input, never ending
+    before initialize (Claude Code blocks a server that does for about 15
+    minutes). Not on Windows: getty-bun.ps1 run-mcp fails with one line.
+  - New command run-ready <entry> [args...]: runs like run when the pinned
+    Bun is installed, and otherwise exits 0 with a note on stderr, without
+    installing anything.
+  - An interrupted download resumes from the partial archive in the store
+    (.downloads) at the next install; a killed starter leaves no download
+    process running.
+  - Entry arguments that start with "-" reach the entry unchanged, also
+    through getty-bun.ps1; the contract no longer forbids them. On Windows,
+    PowerShell's -File rejects some of them before the starter runs: pass
+    only options of the form -x, --name or --name=value, without blanks;
+    in a hook line write a value only of letters, digits and . _ - / :,
+    single-quoted (% and ^ hit the polyglot's limit).
+  - getty-bun.cmd re-runs its line under bash only once
+    (GETTY_BUN_POLYGLOT_REEXEC); a "bash" on PATH that is really dash fails
+    with one getty-bun line and exit 1 instead of looping.
+  - macOS: getty-bun.sh supports darwin-x64 and darwin-aarch64 (a shell under
+    Rosetta 2 gets the native Bun) and takes its lock with perl.
+  - bootstrap/getty-bun.cmd: one file that is a batch script for cmd.exe
+    and PowerShell and a shell script for POSIX shells, for Claude Code
+    hooks in shell form on Windows.
+  - The pin block takes an optional "# platforms" line. A starter on a
+    platform it does not list does nothing and exits 0; status reports the
+    state "undeclared".
+  - SDK: main() takes onFailure: "silent". Every failure exits 0 with
+    nothing on stdout and the one stderr line, for a guard that must stay
+    invisible on broken input.
+  - Consumer requirement: gettyBun.platforms (linux, darwin, windows) in
+    requirement.schema.json declares where a consumer runs.
+  - Contract: the long-lived stdio server (an MCP server) is a second entry
+    kind that runs through run-mcp, never run, with the rules for stdout,
+    signals and the install before the first start (a SessionStart ensure
+    hook).
+  - Contract: how an MCP server starts under Codex (no plugin root, no
+    GETTY_HOME and no CODEX_HOME in its environment; the declaration
+    lists env_vars GETTY_HOME and GETTY_BUN_MIRROR) and under Claude Code.
+  - Contract: an entry that starts a detached long-lived child process
+    follows the rules in dependencies-and-execution.md.
+  - Skill getty-bun-install installs getty-bun.cmd beside the starters and
+    renders an optional vars.bun_platforms into the pin block.
 
 0.1.0     2026-11-26 23:35:17Z
   - POSIX starter bootstrap/getty-bun.sh with run, ensure and status:

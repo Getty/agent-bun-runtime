@@ -2,9 +2,11 @@
 # PowerShell 7).
 #
 #   powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File <root>\bootstrap\getty-bun.ps1 <command>
-#     run <entry> [args...]   ensure, then run the pinned Bun on <root>\<entry>
-#     ensure                  install the pinned Bun if missing
-#     status                  one JSON object on stdout
+#     run <entry> [args...]         ensure, then run the pinned Bun on <root>\<entry>
+#     run-ready <entry> [args...]   as run, but skip (exit 0) if Bun is not installed yet
+#     run-mcp <entry> [args...]     not supported here: fails (MCP servers on Windows: k13)
+#     ensure                        install the pinned Bun if missing
+#     status                        one JSON object on stdout
 #
 # Contract: bootstrap/README.md and docs/plan.md in getty-bun; behavior and exit codes are
 # those of getty-bun.sh. stdout belongs to the entry; every starter failure is one
@@ -16,6 +18,8 @@
 # target linux-x64 bun-linux-x64.zip 94559b3b528995a49452f9f2404cec74f2efd7d06e0a000a8cd214b02c3666eb bun-linux-x64/bun
 # target linux-x64-baseline bun-linux-x64-baseline.zip dcb23a18a1c2fff12d57bcef696dbbb42eb67fde29f43816ecb595459a24c463 bun-linux-x64-baseline/bun
 # target linux-aarch64 bun-linux-aarch64.zip 18656a3bf0ea5641f5796ae4213b75255579a70a0fded2f337933785568cdf84 bun-linux-aarch64/bun
+# target darwin-x64 bun-darwin-x64.zip a4972e778cce4b6a194d7d289f326aa61576d71d80b7a53e9da2f3739566e5fd bun-darwin-x64/bun
+# target darwin-aarch64 bun-darwin-aarch64.zip b5d6bc2e13caf14e57c89661e89efd073ff16165b41bfe43882616410609cd10 bun-darwin-aarch64/bun
 # target windows-x64 bun-windows-x64.zip 815ab45ec7f549abf87e6869584b506eab088e24225683957b7e150b47d6de30 bun-windows-x64/bun.exe
 # target windows-x64-baseline bun-windows-x64-baseline.zip 3c081c73865e7a3453a9d514cc2ba3d699880621bcf67bb17241ff5194cb1d4b bun-windows-x64-baseline/bun.exe
 # <<< getty-bun pin <<<
@@ -51,6 +55,11 @@ function Write-Bytes([System.IO.Stream]$Stream, [string]$Text) {
 
 function ConvertTo-JsonString([string]$Value) {
     '"' + $Value.Replace('\', '\\').Replace('"', '\"') + '"'
+}
+
+# Line breaks and tabs as spaces, as getty-bun.sh's one_line.
+function ConvertTo-OneLine([string]$Text) {
+    $Text.Replace("`n", ' ').Replace("`r", ' ').Replace("`t", ' ')
 }
 
 # --- environment and target --------------------------------------------------------
@@ -148,9 +157,10 @@ function Get-InstallTarget {
 # --- pin ---------------------------------------------------------------------------
 
 # The pin block of this file (format: bootstrap/README.md): exact string comparisons only.
+# The platforms field is empty when the block has no platforms line.
 function Read-Pin([string]$Path) {
     try { $lines = [System.IO.File]::ReadAllLines($Path) } catch { Fail ('cannot read the starter ' + $Path + ' to find its pin') }
-    $pin = @{ file = $Path; version = ''; targets = @{} }
+    $pin = @{ file = $Path; version = ''; platforms = ''; targets = @{} }
     $inBlock = $false
     foreach ($line in $lines) {
         if ($line -ceq '# >>> getty-bun pin: generated, do not edit >>>') { $inBlock = $true; continue }
@@ -158,6 +168,8 @@ function Read-Pin([string]$Path) {
         if ($line -ceq '# <<< getty-bun pin <<<') { break }
         if ($line.StartsWith('# version ', [System.StringComparison]::Ordinal)) {
             $pin.version = $line.Substring(10)
+        } elseif ($line.StartsWith('# platforms ', [System.StringComparison]::Ordinal)) {
+            $pin.platforms = $line.Substring(12)
         } elseif ($line.StartsWith('# target ', [System.StringComparison]::Ordinal)) {
             $fields = $line.Substring(9).Split([char]' ')
             if ($fields.Count -eq 4) { $pin.targets[$fields[0]] = $fields }
@@ -333,35 +345,67 @@ function Remove-Installing([string]$Path) {
     }
 }
 
-# The archive, bounded like getty-bun.sh's curl (--speed-limit 1024 --speed-time 60): no
-# response within 60 s, or less than 60 KiB in a 60 s window, aborts the download (tests
-# pass a shorter window). Each read is waited for by the starter, not by ReadWriteTimeout
-# (not honored on every .NET).
-function Save-Archive([string]$Url, [string]$Path, [int]$WindowSeconds = 60) {
+# The archive into $Part, bounded like getty-bun.sh's curl (--speed-limit 1024
+# --speed-time 60): no response within 60 s, or less than 60 KiB in a 60 s window, aborts
+# the download (tests pass a shorter window). Each read is waited for by the starter, not by
+# ReadWriteTimeout (not honored on every .NET). Bytes already in $Part (an interrupted
+# install's) are resumed with an HTTP Range request: 206 from that offset appends, any
+# other success (a server that ignores the range, file://) writes the file over, and 416
+# leaves it as it is, as curl -C - does: the checksum decides. A failed or interrupted
+# download keeps $Part for the next install, except a 206 for another offset.
+function Save-Archive([string]$Url, [string]$Part, [int]$WindowSeconds = 60) {
     [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
     $windowMs = $WindowSeconds * 1000
     $minBytes = 1024 * $WindowSeconds
     $slow = 'download of ' + $Url + ' failed: less than ' + $WindowSeconds + ' KiB in ' + $WindowSeconds + ' s (below 1 KiB/s)'
+    $offset = [long]0
+    try { if ([System.IO.File]::Exists($Part)) { $offset = [System.IO.FileInfo]::new($Part).Length } } catch { }
     $request = $null
     $response = $null
     $body = $null
     $file = $null
     $done = $false
     try {
-        # http(s) gives an HttpWebRequest, file:// a FileWebRequest without UserAgent and
-        # ReadWriteTimeout; the stall bound below applies to the stream of either.
+        # http(s) gives an HttpWebRequest, file:// a FileWebRequest without UserAgent,
+        # ReadWriteTimeout and ranges; the stall bound below applies to the stream of either.
         $request = [System.Net.WebRequest]::Create($Url)
         $request.Timeout = $windowMs
         if ($request -is [System.Net.HttpWebRequest]) {
             $request.UserAgent = 'getty-bun'
             $request.ReadWriteTimeout = $windowMs
+            if ($offset -gt 0) { $request.AddRange($offset) }
         }
-        $response = $request.GetResponse()
+        try {
+            $response = $request.GetResponse()
+        } catch {
+            $cause = Get-Cause $_.Exception
+            if ($offset -gt 0 -and $cause -is [System.Net.WebException] -and $cause.Response -is [System.Net.HttpWebResponse] -and
+                [int]$cause.Response.StatusCode -eq 416) {
+                Close-Quietly $cause.Response
+                $done = $true
+                return
+            }
+            throw
+        }
+        $append = $false
+        if ($offset -gt 0 -and $response -is [System.Net.HttpWebResponse] -and [int]$response.StatusCode -eq 206) {
+            $range = $response.Headers['Content-Range']
+            if ($null -eq $range -or -not $range.StartsWith('bytes ' + $offset + '-', [System.StringComparison]::Ordinal)) {
+                try { [System.IO.File]::Delete($Part) } catch { }
+                Fail ('download of ' + $Url + ' failed: asked for the bytes from ' + $offset + ', the server sent the range ' + $range + '; the partial download was discarded')
+            }
+            $append = $true
+        }
         $body = $response.GetResponseStream()
-        $file = [System.IO.File]::Create($Path)
+        if ($append) {
+            $file = [System.IO.File]::Open($Part, [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
+        } else {
+            $file = [System.IO.File]::Create($Part)
+        }
         $buffer = [byte[]]::new(65536)
         $clock = [System.Diagnostics.Stopwatch]::StartNew()
         $windowBytes = 0
+        $received = [long]0
         while ($true) {
             $read = $body.ReadAsync($buffer, 0, $buffer.Length)
             while (-not $read.Wait([int][Math]::Max(0, $windowMs - $clock.ElapsedMilliseconds))) {
@@ -373,6 +417,7 @@ function Save-Archive([string]$Url, [string]$Path, [int]$WindowSeconds = 60) {
             if ($n -le 0) { break }
             $file.Write($buffer, 0, $n)
             $windowBytes += $n
+            $received += $n
             if ($clock.ElapsedMilliseconds -ge $windowMs) {
                 if ($windowBytes -lt $minBytes) { Fail $slow }
                 $windowBytes = 0
@@ -380,6 +425,14 @@ function Save-Archive([string]$Url, [string]$Path, [int]$WindowSeconds = 60) {
             }
         }
         $file.Flush()
+        # An early end of the body is a failed download, as curl's exit 18: the bytes so far
+        # stay in $Part for the next install to resume.
+        $expected = $response.ContentLength
+        if ($append -and $range -match '/([0-9]+)$') { $expected = [long]$Matches[1] - $offset }
+        if ($expected -ge 0 -and $received -lt $expected) {
+            Fail ('download of ' + $Url + ' failed: the body ended after ' + $received + ' of ' + $expected +
+                ' bytes; the partial download stays for the next install')
+        }
         $done = $true
     } catch {
         $cause = Get-Cause $_.Exception
@@ -507,6 +560,24 @@ function Move-Directory([string]$From, [string]$To) {
     }
 }
 
+# File.Move of the verified archive into staging, retried on sharing violations for about
+# 10 s like Move-Directory (antivirus may scan the fresh download).
+function Move-Archive([string]$From, [string]$To) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    while ($true) {
+        try {
+            [System.IO.File]::Move($From, $To)
+            return
+        } catch {
+            $cause = Get-Cause $_.Exception
+            if ([DateTime]::UtcNow -ge $deadline -or -not ($cause -is [System.IO.IOException] -or $cause -is [System.UnauthorizedAccessException])) {
+                Fail ('cannot move ' + $From + ' to ' + $To + ': ' + $cause.Message)
+            }
+        }
+        Start-Sleep -Milliseconds 250
+    }
+}
+
 function Remove-Tree([string]$Path) {
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
     while ([System.IO.Directory]::Exists($Path)) {
@@ -560,10 +631,20 @@ function Install-Target($Pin, [string]$BunDir, [string]$Target, [int]$WaitSecond
         $mirror = $env:GETTY_BUN_MIRROR
         if ([string]::IsNullOrEmpty($mirror)) { $mirror = 'https://github.com/oven-sh/bun/releases/download' }
         $url = $mirror.TrimEnd('/') + '/bun-v' + $version + '/' + $fields[1]
+        # The archive downloads into the store, where an interrupted install leaves it for
+        # the next one to resume; only the holder of this target's lock touches it.
+        $partDir = [System.IO.Path]::Combine($BunDir, '.downloads', $version, $Target)
+        $part = [System.IO.Path]::Combine($partDir, $fields[1] + '.part')
+        try { $null = [System.IO.Directory]::CreateDirectory($partDir) }
+        catch { Fail ('cannot create the download directory ' + $partDir + ': ' + (Get-Cause $_.Exception).Message) }
+        Save-Archive $url $part
+        $got = Get-Sha256 $part
+        if ($got -cne $sha256) {
+            try { [System.IO.File]::Delete($part) } catch { }
+            Fail ('checksum mismatch for ' + $url + ': sha256 ' + $got + ', pinned ' + $sha256 + '; nothing was published')
+        }
         $zip = [System.IO.Path]::Combine($stage, 'archive.zip')
-        Save-Archive $url $zip
-        $got = Get-Sha256 $zip
-        if ($got -cne $sha256) { Fail ('checksum mismatch for ' + $url + ': sha256 ' + $got + ', pinned ' + $sha256 + '; nothing was published') }
+        Move-Archive $part $zip
 
         $stagedExe = [System.IO.Path]::Combine($stage, 'slot', 'bin', 'bun.exe')
         Expand-Member $zip $fields[3] $stagedExe $url
@@ -713,14 +794,47 @@ function Invoke-Bun([string]$Exe, [string[]]$Arguments) {
 
 # --- main --------------------------------------------------------------------------
 
+# This script's arguments as the process received them (k51). -File hands the arguments
+# after the script path to PowerShell's parameter binding, which re-parses those that start
+# with "-" before they reach $args: pwsh splits -x:foo into -x and foo and drops --%, and
+# -x: takes the next argument as its value. The process's argument vector (split by the
+# C runtime's rules from its command line) is untouched by that. So when this process
+# was started with -File and this script, the arguments are the ones after the script path
+# there; otherwise (the script called inside another PowerShell session) they are $args.
+# Limit: -File can fail on a dash argument before this script runs (exit 1, PowerShell's
+# own "argument "name" is not valid" message), which no reading of the vector recovers.
+# Windows PowerShell 5.1 called directly rejected a lone "-" (CI 46027293350 and
+# 46031834399) and passed "-:foo" (CI 46031834399); pwsh 7 called directly passed a lone
+# "-" and rejected "-:foo" (CI 46031834399). So on Windows pass no lone "-" and nothing
+# that begins with "-:" (README, Windows starter, entry arguments).
+function Get-Arguments([string]$ScriptPath, [object[]]$Bound) {
+    $argv = [Environment]::GetCommandLineArgs()
+    $leaf = $ScriptPath.Substring($ScriptPath.LastIndexOfAny([char[]]'\/') + 1)
+    # The host stops reading its own parameters at -File (also -f, -fi, -fil; - -- or /),
+    # so the first one is the host's.
+    for ($i = 1; $i -lt $argv.Count - 1; $i++) {
+        if ($argv[$i] -notmatch '^(?:--?|/)(?:f|fi|fil|file)$') { continue }
+        $path = $argv[$i + 1]
+        if ($path.Substring($path.LastIndexOfAny([char[]]'\/') + 1) -eq $leaf) {
+            if ($i + 2 -lt $argv.Count) { return [string[]]$argv[($i + 2)..($argv.Count - 1)] }
+            return
+        }
+        break
+    }
+    [string[]]$Bound
+}
+
 function Invoke-GettyBun([string]$ScriptPath, [string[]]$Argv) {
     $Argv = @($Argv)
     $command = ''
     if ($Argv.Count -gt 0) { $command = $Argv[0] }
     # No file name: under Git Bash the user called getty-bun.sh, which forwards here.
-    $usage = 'usage: run <entry> [args...] | ensure | status'
-    if ($command -ceq 'run') {
-        if ($Argv.Count -lt 2) { Fail 'usage: run <entry> [args...]' }
+    $usage = 'usage: run <entry> [args...] | run-ready <entry> [args...] | run-mcp <entry> [args...] (not on Windows) | ensure | status'
+    if ($command -ceq 'run' -or $command -ceq 'run-ready') {
+        if ($Argv.Count -lt 2) { Fail ('usage: ' + $command + ' <entry> [args...]') }
+    } elseif ($command -ceq 'run-mcp') {
+        # getty-bun.sh's stdio server mode; here it fails before anything else runs (k13).
+        Fail ('run-mcp is not supported by ' + $ScriptPath + ': MCP servers through the PowerShell starter (and the Git Bash forwarding) are not available yet (k13)')
     } elseif ($command -ceq 'ensure' -or $command -ceq 'status') {
         if ($Argv.Count -ne 1) { Fail $usage }
     } else {
@@ -728,22 +842,36 @@ function Invoke-GettyBun([string]$ScriptPath, [string[]]$Argv) {
     }
     # BUN_OPTIONS would add Bun flags (a --preload, too) after --config and --no-env-file;
     # the others load code or move it outside the plugin: a preload, the inspector, module
-    # resolution, env-chosen caches, the macOS webview host (k40). Removed from this
-    # process, so the probe and the entry inherit the environment without them; never
-    # through ProcessStartInfo.EnvironmentVariables, which throws on names that differ only
-    # in case (Path and PATH under MSYS or Cygwin). [NullString]::Value, not $null: PowerShell
-    # hands $null to a string parameter as "", and from .NET 9 on (pwsh 7.5+) "" keeps an
-    # empty variable instead of deleting it (an empty BUN_INSPECT_PRELOAD is a preload of "").
+    # resolution, a code cache, the macOS webview host (k40). Removed from this process, so
+    # the probe and the entry inherit the environment without them; never through
+    # ProcessStartInfo.EnvironmentVariables, which throws on names that differ only in case
+    # (Path and PATH under MSYS or Cygwin). [NullString]::Value, not $null: PowerShell hands
+    # $null to a string parameter as "", and from .NET 9 on (pwsh 7.5+) "" keeps an empty
+    # variable instead of deleting it (an empty BUN_INSPECT_PRELOAD is a preload of "").
     foreach ($name in @('BUN_OPTIONS', 'BUN_INSPECT_PRELOAD', 'BUN_INSPECT',
-            'BUN_INSPECT_CONNECT_TO', 'NODE_PATH', 'NODE_COMPILE_CACHE',
-            'BUN_RUNTIME_TRANSPILER_CACHE_PATH', 'BUN_INTERNAL_WEBVIEW_HOST')) {
+            'BUN_INSPECT_CONNECT_TO', 'NODE_PATH', 'NODE_COMPILE_CACHE', 'BUN_INTERNAL_WEBVIEW_HOST')) {
         [Environment]::SetEnvironmentVariable($name, [NullString]::Value)
     }
+    # 0 turns Bun's transpiler cache off, where unset lets Bun write one into the user's
+    # cache directory for an entry that is not a bundle (k46); set, never removed, the same way.
+    [Environment]::SetEnvironmentVariable('BUN_RUNTIME_TRANSPILER_CACHE_PATH', '0')
 
     $gettyHome = Get-GettyHome
     $null = Get-LockWait
-    Assert-Architecture
     $pin = Read-Pin $ScriptPath
+    # A platforms line without windows: nothing to do here, before any target detection.
+    if ($pin.platforms.Length -gt 0 -and -not (' ' + $pin.platforms + ' ').Contains(' windows ')) {
+        if ($command -ceq 'status') {
+            Write-Bytes ([Console]::OpenStandardOutput()) ('{"pin":' + (ConvertTo-JsonString $pin.version) + ',"target":null,"slot":null,"state":"undeclared"}')
+            return 0
+        }
+        $what = $command + ' skipped'
+        if ($command -cne 'ensure') { $what += ' ' + (ConvertTo-OneLine $Argv[1]) }
+        Write-Bytes ([Console]::OpenStandardError()) ('getty-bun: platform windows is not declared in the pin of ' + $ScriptPath +
+            ' (platforms ' + $pin.platforms + '); ' + $what)
+        return 0
+    }
+    Assert-Architecture
     $bunDir = [System.IO.Path]::Combine($gettyHome, 'runtimes', 'bun')
     $found = Find-Slot $bunDir $pin
 
@@ -762,6 +890,17 @@ function Invoke-GettyBun([string]$ScriptPath, [string[]]$Argv) {
             ',"slot":' + (ConvertTo-JsonString $slot) + ',"state":' + (ConvertTo-JsonString $state) + '}')
         return 0
     }
+    if ($null -eq $found -and $command -ceq 'run-ready') {
+        # Never installs: no lock, no staging, no download, nothing written. No CPU detection
+        # either (Add-Type compiles C# on every hook): the line names the first candidate,
+        # windows-x64, the slot an install on an AVX2 CPU publishes.
+        $target = 'windows-x64'
+        $null = Get-PinTarget $pin $target
+        $slot = [System.IO.Path]::Combine($bunDir, $pin.version, $target)
+        Write-Bytes ([Console]::OpenStandardError()) ('getty-bun: Bun ' + $pin.version + ' ' + $target + ' is not installed yet (' + $slot +
+            '); run-ready skipped ' + (ConvertTo-OneLine $Argv[1]))
+        return 0
+    }
     $config = Initialize-BunConfig $bunDir
     if ($null -eq $found) {
         $found = Install-Pinned $pin $bunDir $config
@@ -770,7 +909,7 @@ function Invoke-GettyBun([string]$ScriptPath, [string[]]$Argv) {
     }
     if ($command -ceq 'ensure') { return 0 }
 
-    # run: the consumer root is the parent of this starter's directory, never the cwd.
+    # run, run-ready: the consumer root is the parent of this starter's directory, never the cwd.
     $root = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetDirectoryName($ScriptPath))
     $entry = $root + [System.IO.Path]::DirectorySeparatorChar + $Argv[1].Replace([char]'/', [System.IO.Path]::DirectorySeparatorChar)
     $rest = @()
@@ -783,7 +922,7 @@ function Invoke-GettyBun([string]$ScriptPath, [string[]]$Argv) {
 
 $exitCode = 1
 try {
-    $result = @(Invoke-GettyBun $PSCommandPath $args)
+    $result = @(Invoke-GettyBun $PSCommandPath @(Get-Arguments $PSCommandPath $args))
     if ($result.Count -ne 1 -or $result[0] -isnot [int]) { Fail ('internal error: ' + $result.Count + ' values instead of one exit code') }
     $exitCode = $result[0]
 } catch {

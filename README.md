@@ -80,7 +80,7 @@ interface MainOptions {
   maxInputBytes?: number;               // default DEFAULT_MAX_INPUT_BYTES
   onFailure?: FailurePolicy;            // default "open"
 }
-type FailurePolicy = "open" | "closed";
+type FailurePolicy = "open" | "closed" | "silent";
 type HookHandler = (context: HookContext) =>
   HookEffect | readonly HookEffect[] | Promise<HookEffect | readonly HookEffect[]>;
 interface HookContext { invocation: HookInvocation; env: Env }
@@ -348,6 +348,7 @@ The handler reads `invocation.host.kind` when the hosts need different answers.
 | Code | When | stdout | stderr |
 |---|---|---|---|
 | 0 | The effect was encoded and written | The encoded effect; nothing for `no-decision` | Nothing from the SDK |
+| 0 | Every failure, with `onFailure: "silent"` | Nothing | One line: `agent-bun-runtime: <CODE>: <message>` |
 | 1 | Every failure, typed or not, with `onFailure: "open"` (the default) | Nothing | One line: `agent-bun-runtime: <CODE>: <message>` |
 | 2 | Every failure, with `onFailure: "closed"` | Nothing | The same line |
 
@@ -364,8 +365,13 @@ also serves any other event keeps `"open"`; a guard that needs `"closed"` gets i
 entry for those two events, or its own hook command whose argument the entry maps to the
 policy. `main()` sees only the event at hand, not the events its command is wired to, so
 the SDK does not check this rule. With `"open"` the host goes on, except where any
-non-zero exit counts (Claude Code's `WorktreeCreate` and `WorktreeRemove`, below). An
-`onFailure` other than `"open"` or `"closed"` is
+non-zero exit counts (Claude Code's `WorktreeCreate` and `WorktreeRemove`, below).
+`"silent"` is for a guard that must stay invisible on broken input, where `"open"` would
+make the host show a hook error: a failure exits 0 with nothing on stdout, the bytes a
+`no-decision` ends with, so the host goes on as if the entry had decided nothing. The
+trade-off: the failure shows only where the host logs a hook's stderr, and a guard on
+`PreToolUse` or `UserPromptSubmit` lets the tool call or prompt through without a word. An
+`onFailure` other than `"open"`, `"closed"` or `"silent"` is
 `INTERNAL_ERROR` and exit 1, before stdin is read: the intended policy is unknown. The
 codes stay within 0–255. On `OUTPUT_FAILED` stdout may
 already hold bytes. Line breaks in the message become spaces. The codes:

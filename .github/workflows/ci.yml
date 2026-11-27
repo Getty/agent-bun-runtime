@@ -28,6 +28,8 @@ jobs:
         include:
           - { name: linux-x64 sh, os: ubuntu-latest, starter: sh }
           - { name: linux-arm64 sh, os: ubuntu-24.04-arm, starter: sh }
+          - { name: macos-arm64 sh, os: macos-15, starter: sh }
+          - { name: macos-x64 sh, os: macos-15-intel, starter: sh }
           - { name: windows powershell, os: windows-latest, starter: powershell }
           - { name: windows pwsh, os: windows-latest, starter: pwsh }
     env:
@@ -85,6 +87,32 @@ jobs:
             exit 1
           }
           "no parse errors under PowerShell $($PSVersionTable.PSVersion)"
+      - name: Shells for the polyglot test (dash, busybox, zsh)
+        # The suite runs getty-bun.cmd under every shell it finds; install them so no leg
+        # silently drops one, and fail when a leg still lacks them. macOS ships bash 3.2 as
+        # /bin/sh and /bin/bash and no dash; Homebrew has no busybox formula and busybox
+        # needs /proc besides, so macOS gets dash only (the suite asserts the documented
+        # dash failure there; zsh ships with macOS). The Ubuntu images have dash as /bin/sh
+        # and no zsh, so the Ubuntu legs install it.
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -eu
+          if [ "$RUNNER_OS" = macOS ]; then
+            HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_ENV_HINTS=1 brew install dash
+            shells="dash bash"
+          else
+            sudo apt-get update
+            sudo apt-get install -y dash busybox-static zsh
+            shells="dash bash busybox zsh"
+          fi
+          for c in $shells; do
+            command -v "$c" || { echo "$c is missing on this leg" >&2; exit 1; }
+          done
+          if [ "$RUNNER_OS" != macOS ]; then
+            busybox sh -c 'echo busybox sh ok'
+          fi
+          bash --version | head -n 1
       - uses: ./.github/actions/nunjucks
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -95,7 +123,20 @@ jobs:
         run: bun bootstrap/test/fetch-fixtures.ts
       - name: Scenario suite
         shell: bash
-        run: bun test bootstrap/test
+        run: |
+          set -o pipefail
+          bun test bootstrap/test 2>&1 | tee "$RUNNER_TEMP/scenarios.log"
+      - name: No missing-shell skip on Windows
+        # Second line behind the suite, which turns a missing shell on Windows into a
+        # failure itself: the skip reasons testWhen logs for a missing shell or Git Bash
+        # (bootstrap/test/polyglot.test.ts, entry-args.test.ts) must not appear here.
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          if grep -nE '\[bootstrap-test\] SKIP .*(is not installed on this machine|Git Bash bash\.exe not found)' "$RUNNER_TEMP/scenarios.log"; then
+            echo "a shell the Windows legs must have was skipped" >&2
+            exit 1
+          fi
 
   static:
     name: shellcheck and static checks
@@ -113,17 +154,26 @@ jobs:
         run: |
           shellcheck --version
           shellcheck bootstrap/getty-bun.sh
+          # getty-bun.cmd is a cmd/sh polyglot: the sh half is what shellcheck reads.
+          shellcheck -s sh bootstrap/getty-bun.cmd
       - name: Starters are pure ASCII
         run: |
           # Windows PowerShell 5.1 reads a file without BOM in the ANSI code page; the sh
           # starter is held to the same rule.
           status=0
-          for f in bootstrap/getty-bun.ps1 bootstrap/getty-bun.sh; do
+          for f in bootstrap/getty-bun.ps1 bootstrap/getty-bun.sh bootstrap/getty-bun.cmd \
+                   skills/getty-bun-install/bootstrap/getty-bun.cmd; do
             if LC_ALL=C grep -nP '[^\x00-\x7F]' "$f"; then
               echo "$f contains non-ASCII bytes" >&2
               status=1
             fi
           done
+          # The template copy of the polyglot must carry no CR either.
+          f=skills/getty-bun-install/bootstrap/getty-bun.cmd
+          if grep -nP '\r' "$f"; then
+            echo "$f contains CR bytes" >&2
+            status=1
+          fi
           exit "$status"
       - name: Pin blocks match a fresh render
         run: bun bootstrap/render-pin.ts --table bootstrap/versions.json --version "$PIN_VERSION" --check bootstrap/getty-bun.sh bootstrap/getty-bun.ps1
@@ -182,6 +232,8 @@ jobs:
       matrix:
         include:
           - { name: linux-x64 sh, os: ubuntu-latest, starter: sh }
+          - { name: macos-arm64 sh, os: macos-15, starter: sh }
+          - { name: macos-x64 sh, os: macos-15-intel, starter: sh }
           - { name: windows powershell, os: windows-latest, starter: powershell }
           - { name: windows pwsh, os: windows-latest, starter: pwsh }
     env:
@@ -225,6 +277,7 @@ jobs:
       matrix:
         include:
           - { name: linux-x64, os: ubuntu-latest }
+          - { name: macos-arm64, os: macos-15 }
           - { name: windows, os: windows-latest }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -272,6 +325,8 @@ jobs:
         include:
           - { name: linux-x64 sh, os: ubuntu-latest, starter: sh }
           - { name: linux-arm64 sh, os: ubuntu-24.04-arm, starter: sh }
+          - { name: macos-arm64 sh, os: macos-15, starter: sh }
+          - { name: macos-x64 sh, os: macos-15-intel, starter: sh }
           - { name: windows powershell, os: windows-latest, starter: powershell }
           - { name: windows pwsh, os: windows-latest, starter: pwsh }
     env:
