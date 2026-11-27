@@ -391,5 +391,32 @@ describe(`item 6: the .cmd polyglot dot-sourced in shell form [${STARTER}]`, () 
         expect(server.total(), "a starter ran and asked the mirror").toBe(0);
       },
     );
+
+    // Rework R5 (GETTY_BUN_POLYGLOT_REEXEC): the re-run under "bash" must happen once. A `bash` on the PATH
+    // that is really dash would make the polyglot re-run itself without end (every pass is an exec, so
+    // one PID spins); the guard variable ends it with one getty-bun line and exit 1.
+    testWhen(
+      dash !== null,
+      "dash is not installed on this machine (CI installs it)",
+      "dash re-run guard: a `bash` on the PATH that execs dash does not loop: one getty-bun line, exit 1, within seconds",
+      async () => {
+        const server = startServer({});
+        track(() => server.stop());
+        const sb = await sandbox({ mirror: server.url });
+        const fake = join(sb.tmp, "fake-bash");
+        await mkdir(fake, { recursive: true });
+        await writeFile(join(fake, "bash"), `#!/bin/sh\nexec '${dash!}' "$@"\n`, { mode: 0o755 });
+        const line = `. "${join(sb.root, "bootstrap", POLYGLOT_FILE)}" run e.js`;
+        const r = await run([dash!, "-c", line], { env: { ...hookEnv(sb), PATH: `${fake}:${sb.env.PATH}` }, cwd: sb.cwd, timeoutMs: 15_000 });
+        expect(r.timedOut, "the polyglot loops: it kept re-running itself under the fake bash until the test killed it (no GETTY_BUN_POLYGLOT_REEXEC guard)").toBe(false);
+        expect(r.ms).toBeLessThan(10_000);
+        expectExit(r, 1);
+        expect(r.out).toBe("");
+        const lines = r.err.split(/\r?\n/).filter((l) => l !== "");
+        expect(lines, `stderr ${JSON.stringify(r.err)}`).toHaveLength(1);
+        expect(lines[0]).toMatch(/^getty-bun: /);
+        expect(server.total(), "a starter ran and asked the mirror").toBe(0);
+      },
+    );
   }
 });

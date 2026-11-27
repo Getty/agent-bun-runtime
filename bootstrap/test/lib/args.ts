@@ -1,7 +1,7 @@
 // Entry arguments of the item 4 and item 6 tests. No test hooks here.
 
 /** Arguments that begin with a dash (release 0.2.0 item 4), in the order they are passed. */
-export const DASH_ARGS = ["-x", "-x:foo", "--", "--%", "-File", "-Command", "x", "-Command x", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Verbose", "-ErrorAction:Stop", "-Debug"];
+export const DASH_ARGS = ["-x", "-x:foo", "--", "--%", "-File", "-Command", "x", "-Command x", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Verbose", "-ErrorAction:Stop", "-Debug", "--name", "--name=value", "--name=a:b"];
 
 /**
  * A lone `-`: the sh starter passes it; on Windows PowerShell 5.1 `-File` rejects it at binding time

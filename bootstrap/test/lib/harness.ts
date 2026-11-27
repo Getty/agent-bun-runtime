@@ -700,7 +700,7 @@ export interface StarterOptions {
 
 /**
  * Call the starter under test. Fails the test when the call timed out and, for every
- * command except `run` and `run-ready` (whose exit code is the entry's), when it exited with 2.
+ * command except `run`, `run-ready` and `run-mcp` (whose exit code is the entry's), when it exited with 2.
  */
 export async function starter(sb: Sandbox, args: string[], o: StarterOptions = {}): Promise<RunResult> {
   const env: Record<string, string> = { ...sb.env };
@@ -722,7 +722,7 @@ export async function starter(sb: Sandbox, args: string[], o: StarterOptions = {
     timeoutMs: o.timeoutMs ?? 120_000,
   });
   if (r.timedOut) throw new Error(`starter ${args.join(" ")} timed out after ${r.ms | 0} ms\nstderr: ${r.err}`);
-  if (args[0] !== "run" && args[0] !== "run-ready" && r.code === 2) {
+  if (args[0] !== "run" && args[0] !== "run-ready" && args[0] !== "run-mcp" && r.code === 2) {
     throw new Error(`starter ${args.join(" ")} exited 2 (a starter never exits 2)\nstderr: ${r.err}`);
   }
   return r;
