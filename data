@@ -1,0 +1,26 @@
+---
+class: standard
+completed: 2026-11-27T17:28:35Z
+created: 2026-11-26T22:03:38Z
+id: 43
+priority: high
+started: 2026-11-27T14:16:18Z
+status: done
+tags:
+- bootstrap
+- test
+- release-0.2.0
+title: 'Bootstrap suite: a full bootstrap/test run leaks getty-bun-test-* sandboxes
+  in TMPDIR'
+updated: 2026-11-27T17:28:35Z
+---
+
+Found during k40 (posix worker): `bun test bootstrap/test` leaves ~46 getty-bun-test-* dirs per run in TMPDIR; each file alone leaves none. Likely cause: bootstrap/test/lib/harness.ts registers its afterEach on import (:156), which attaches to one file only (comment at :21 says scenarios.test.ts) - against the hazard rule that each test file cleans up in its own afterEach/afterAll. On 2026-11-26 690 leftovers (47G) filled a tmpfs /tmp and caused false failures; the main session removed them (no bun test running). Fix in the test-writer lane: each test file registers its own cleanup; a check that a full run leaves no getty-bun-test-* dir.
+
+2026-11-26 related (windows reviewer, k40): the bootstrap harness passes XDG_CACHE_HOME (Windows: LOCALAPPDATA, TEMP) through, so a starter run in the suite can write Bun's default transpiler cache into the developer's real cache. Scope the cache dirs to the sandbox in the same fix.
+
+2026-11-27 14:15 Adopted for release 0.2.0, item 13.
+
+2026-11-27 15:41 Committed 65237bd (per-file cleanupAll, sandbox.test.ts guard; 46 -> 0 leaked dirs per full run); pushed.
+
+Commits on next-0.2.0: 65237bd. CI 46040193580 green on 30401e0; reviewers approved; merge into main pending owner
