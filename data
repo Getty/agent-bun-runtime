@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-27T17:27:54Z
+id: 63
+priority: low
+status: backlog
+tags:
+- docs
+- release-0.2.0
+title: '0.2.0 docs: small evidence wording nits after merge-ready'
+updated: 2026-11-27T17:27:54Z
+---
+
+Final review of next-0.2.0 at 30401e0 (approved). (1) The cmd.exe polyglot row is described as passing no arguments (bootstrap/README.md:1069, :1146-1147; paths-platforms.md:52, :87; polyglot.test.ts:219, :239) but passes 'run entries/echo.ts 7': say 'no dash arguments'. (2) bootstrap/README.md:764 'a missing entry' means no entry argument (run-ready.test.ts:176). (3) Add run 46035250753 beside 46031834399 in codex.md:120-123, claude-code.md:250, :272, bootstrap/README.md:860, getty-bun-install/SKILL.md:129.
