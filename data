@@ -1,0 +1,21 @@
+---
+class: standard
+completed: 2026-11-27T17:30:09Z
+created: 2026-11-27T14:14:39Z
+id: 56
+priority: medium
+started: 2026-11-27T14:44:35Z
+status: done
+tags:
+- docs
+- skills
+- release-0.2.0
+title: 'codex.md: starting an MCP server under Codex'
+updated: 2026-11-27T17:30:09Z
+---
+
+Release 0.2.0 (hub card agent-developer k14). Spec: docs/plan.md "Release 0.2.0", ADR 0011. Item 10. agent-irc L6/G5: no plugin root, no CODEX_HOME at the server; the locator lives in the consumer.
+
+2026-11-27 15:41 Committed 4965637 (codex.md MCP start under Codex, locator in the consumer); pushed.
+
+Commits on next-0.2.0: 4965637. CI 46040193580 green on 30401e0; reviewers approved; merge into main pending owner
