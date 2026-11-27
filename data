@@ -1,0 +1,24 @@
+---
+class: standard
+completed: 2026-11-27T17:29:00Z
+created: 2026-11-26T23:32:20Z
+id: 48
+priority: low
+started: 2026-11-27T14:44:32Z
+status: done
+tags:
+- docs
+- bootstrap
+- release-0.2.0
+title: 'Bun variable table: add NODE_COMPILE_CACHE_PORTABLE, NODE_DISABLE_COMPILE_CACHE,
+  BUN_JSC_*'
+updated: 2026-11-27T17:29:00Z
+---
+
+Hub review before the tag, small item. The review of the Bun 1.4.5 environment variables (k40) omits NODE_COMPILE_CACHE_PORTABLE, NODE_DISABLE_COMPILE_CACHE and BUN_JSC_*; per the hub they load no code. Add them with source line and verdict (harmless, with reason) wherever the table is kept (bootstrap/README.md and contract.md as applicable). Scout first for the source lines.
+
+2026-11-27 14:15 Adopted for release 0.2.0, item 12.
+
+2026-11-27 15:41 Committed cd5edfe (bootstrap/README.md table) and 4965637 (contract.md); pushed.
+
+Commits on next-0.2.0: 4965637, cd5edfe. CI 46040193580 green on 30401e0; reviewers approved; merge into main pending owner
