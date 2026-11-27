@@ -1,0 +1,20 @@
+---
+class: standard
+completed: 2026-11-27T19:48:42Z
+created: 2026-11-27T18:08:41Z
+id: 65
+priority: high
+started: 2026-11-27T18:09:04Z
+status: done
+tags:
+- bootstrap
+- posix
+- release-0.2.0
+title: 'POSIX starter: run-mcp, wait for the slot, else a stub MCP server (no 15-min
+  block)'
+updated: 2026-11-27T19:48:42Z
+---
+
+0.2.0 rework after the hub review (hub card agent-developer k14). R1/V1. Spec: docs/plan.md 'Rework after the hub review'. Claude Code 2.1.332 blocks an MCP server for ~15 min after any end before initialize.
+
+Commits on next-0.2.0: 75a7b2c, 8713ac5, 8ab12a5, 5ac9528. CI 46058085048 green on 5ac9528; reviewers approved; merge into main pending owner
