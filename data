@@ -1,0 +1,19 @@
+---
+class: standard
+completed: 2026-11-27T19:49:01Z
+created: 2026-11-27T18:08:48Z
+id: 67
+priority: high
+started: 2026-11-27T18:09:10Z
+status: done
+tags:
+- docs
+- skills
+- release-0.2.0
+title: '0.2.0 docs rework: contract, host facts, consumer notes'
+updated: 2026-11-27T19:49:01Z
+---
+
+0.2.0 rework after the hub review (hub card agent-developer k14). R2, R3, R4, R6, R8, R9, R10 of the rework brief.
+
+Commits on next-0.2.0: 8ab12a5, 5ac9528. CI 46058085048 green on 5ac9528; reviewers approved; merge into main pending owner
