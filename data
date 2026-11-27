@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-27T18:08:54Z
+id: 69
+priority: low
+status: backlog
+tags:
+- ci
+- macos
+title: 'CI: a macOS leg with the real download'
+updated: 2026-11-27T18:08:54Z
+---
+
+Hub review 0.2.0 H10: darwin archives come only from fixtures; curl and GitHub redirects on macOS unchecked.
