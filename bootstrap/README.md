@@ -607,8 +607,14 @@ the lock stays with the open file on fd 9 when perl exits and closes with the in
 command group, before Bun starts. (The perl lock executed on Linux, perl 5.40.1, in a
 copy of the starter forced onto it: timeout after 2024 ms with `GETTY_BUN_LOCK_WAIT=2`,
 18 ms with 0, three parallel `run`s sharing one download, and mutual exclusion with
-`flock(1)` both ways. On macOS: not checked; it runs only in the CI macOS legs of
-release 0.2.0, item 5.)
+`flock(1)` both ways. On macOS: executed, CI 46035250753, the macOS arm64 (`macos-15`)
+and x64 (`macos-15-intel`) scenario legs, where the suite's fixture takes the lock through
+perl as well: four parallel `ensure` sharing one archive request, a waiter running out
+with exit 1 after waiting against a lock the perl fixture holds (`GETTY_BUN_LOCK_WAIT=2`),
+a waiter running out against an installing starter and naming its `.installing`, and an
+entry running while the test takes the lock without waiting
+(`bootstrap/test/scenarios.test.ts`).
+Mutual exclusion with `flock(1)` on macOS: not applicable, there is none.)
 Hashing: `sha256sum` when on `PATH`, else `shasum -a 256`; no `/proc`: the `.installing`
 record has `processStartToken` and `environmentId` `null` there.
 
@@ -678,7 +684,7 @@ lock. ARM64 fails as an unsupported target. (The `Add-Type` check and the ARM64 
 simulated through `PROCESSOR_ARCHITECTURE`: executed, CI 45572032454; there the check
 chose `windows-x64`, logged as `target windows-x64` by both per-hook cost jobs after a
 fresh `ensure` (jobs 139060757366 and 139060757556). The illegal-instruction fallback:
-source-checked (`getty-bun.ps1:583-600`), a local run with pwsh 7 on Linux and a
+source-checked (`getty-bun.ps1:692-709`), a local run with pwsh 7 on Linux and a
 fixture probe that exits with that code, not in CI. A real CPU without AVX2, and
 Constrained Language Mode, which also restricts the .NET calls the rest of the starter
 makes: not checked.)
@@ -691,8 +697,11 @@ slot, or, with neither present, the detected target's. The fast path uses no `Ad
 and no cmdlet from a module that 5.1 would have to load (`[type]::new()`, never
 `New-Object`); the per-hook CI job measures what that costs. (`ready`, `mismatch` for a
 tampered receipt or a missing or empty `bun.exe`, and `missing`: executed, CI
-45572032454. The slot order and the own-functions-only rule: source-checked
-(`getty-bun.ps1:179-214`, `:687-737`), a local run with pwsh 7 on Linux, not in CI.)
+45572032454. The slot order, a mismatching `windows-x64` slot not skipped for a ready
+baseline one, and `status` with neither slot: executed, CI 46035250753, the Windows
+PowerShell 5.1 and pwsh 7 legs, `bootstrap/test/fast-target.test.ts`, with planted slots.
+The own-functions-only rule: source-checked (`getty-bun.ps1:190-225`, `:826-917`), a
+local run with pwsh 7 on Linux, not in CI.)
 
 **Limit: a CPU that loses AVX2.** The fast path does not detect the CPU, so a slot
 installed as `windows-x64` stays the first existing slot when the same profile later
@@ -713,7 +722,7 @@ before the entry starts. A failed probe is retried once after about 1 s (antivir
 hold a fresh `bun.exe`), a timed-out one is not; the move of the verified archive into
 staging and the rename into the slot are retried for about 10 s on sharing violations. (The download window against a stalling and a
 trickling local server, the probe kill and the timed-out probe without retry:
-source-checked (`getty-bun.ps1:313-349`, `:430-433`, `:448`), a local run with pwsh 7
+source-checked (`getty-bun.ps1:357-425`, `:511-514`, `:529`), a local run with pwsh 7
 on Linux, not in CI. The error-mode calls run, best effort, in every install of CI
 45572032454; that they took effect and keep a crash dialog away, the probe retry and the
 rename and archive move retries: not checked.)
@@ -746,9 +755,15 @@ on stderr and exits 0; it takes no lock and writes nothing, not even
 `.config\bunfig.toml`. It detects no CPU there: `Add-Type` compiles C# and would cost
 every hook that runs before the install, so the line names the first candidate,
 `windows-x64`, and its slot, which an install on a CPU without AVX2 replaces by
-`windows-x64-baseline` (`status` and the install still detect). (A local run with pwsh
-7.7.0 on Linux, not in CI, before the detection was dropped: the line, exit 0 and an
-absent `GETTY_HOME` afterwards; on Windows: not checked yet, CI legs pending.)
+`windows-x64-baseline` (`status` and the install still detect). (Executed, CI
+46035250753, the Windows PowerShell 5.1 and pwsh 7 scenario legs,
+`bootstrap/test/run-ready.test.ts`: with no slot the line, exit 0, empty stdout, no
+request and no `GETTY_HOME` afterwards, also while another process holds the install
+lock; a ready slot runs as `run` with the same streams, exit code and arguments; a
+`mismatch` slot, a relative `GETTY_HOME`, ARM64 simulated through
+`PROCESSOR_ARCHITECTURE` and a missing entry fail with exit 1 and one line. The line
+names `windows-x64` there because the runner's CPU has AVX2; a CPU without it: not
+checked.)
 
 **Download and resume.** Under the install lock the archive downloads to
 `<GETTY_HOME>\runtimes\bun\.downloads\<version>\<target>\<archive>.part`, in process
@@ -770,8 +785,17 @@ resuming it with `Range: bytes=50-`. The early end of a body: a local run with p
 on Linux, not in CI, against a server that closes after 500 of 1024 bytes (`200`) and
 after 100 more (`206`): both failed with the `.part` kept (500, then 600 bytes), and the
 next call resumed it to 1024; .NET on pwsh 7 raised the early end itself, so the
-starter's own byte count was not reached there; .NET Framework under 5.1, Windows and a
-killed download: not checked yet, CI legs pending.)
+starter's own byte count was not reached there. On Windows: executed, CI 46035250753, the
+Windows PowerShell 5.1 and pwsh 7 scenario legs, `bootstrap/test/resume.test.ts`: a
+connection dropped and a body ended early and cleanly, each failing with exit 1, one
+line and a clean staging directory, the `.part` kept and the next install asking for the
+rest only; the starter ended by `taskkill /T /F` during the download, the `.part` kept and
+resumed; a corrupted `.part` (resumed) and an oversize one (no body sent) failing their
+checksum and deleted; a server that ignores the range answered by writing the file over;
+a complete `.part` answered `416` and published without a second download; a waiter
+whose wait runs out creating no `.downloads`. Which of .NET Framework and the starter's
+byte count caught the clean early end under 5.1, the `404` that keeps a `.part` and a
+`206` for another offset on Windows: not checked.)
 
 **Platforms.** The pin's platforms line declares `windows` for `getty-bun.ps1` and so for
 the Git Bash forwarding. Without it, after the usage, `GETTY_HOME`,
@@ -780,15 +804,22 @@ the Git Bash forwarding. Without it, after the usage, `GETTY_HOME`,
 `getty-bun: platform windows is not declared in the pin of <starter> (platforms <list>); <command> skipped[ <entry>]`
 on stderr and exit 0, and `status` prints
 `{"pin":"<version>","target":null,"slot":null,"state":"undeclared"}`; an ARM64 Windows
-therefore exits 0 there too. (A local run with pwsh 7.7.0 on Linux, `PROCESSOR_ARCHITECTURE`
-`ARM64`, platforms `linux darwin` and `linux windows`, not in CI; on Windows: not checked
-yet, CI legs pending.)
+therefore exits 0 there too. (Executed, CI 46035250753, the Windows PowerShell 5.1 and
+pwsh 7 scenario legs, `bootstrap/test/platforms.test.ts`: on an undeclared platform `run`,
+`run-ready` and `ensure` exit 0 with one line and `status` prints the `undeclared` JSON,
+with nothing under `GETTY_HOME` and no request, a ready slot does not make it declared,
+and with `PROCESSOR_ARCHITECTURE` `ARM64` simulated `ensure`, `run` and `status` exit 0;
+a listed platform and no platforms line install and run as before. A real ARM64
+Windows: not checked.)
 
 **Transpiler cache.** `getty-bun.ps1` sets `BUN_RUNTIME_TRANSPILER_CACHE_PATH` to `0` in
 its own process environment (`SetEnvironmentVariable`), where it removes the other
-variables, so the probe and the entry inherit it (k46). (A local run with pwsh 7.7.0 on
-Linux: the entry saw `0` with the variable set to a directory by the caller; on Windows:
-not checked yet, CI legs pending.)
+variables, so the probe and the entry inherit it (k46). (Executed, CI 46035250753, the
+Windows PowerShell 5.1 and pwsh 7 scenario legs, `bootstrap/test/hostile-cwd.test.ts`:
+after a control in which the slot's Bun, started raw with the starter's flags, writes a
+transpiler cache, the starter's installing first run and its fast path write none, the
+caller's own cache directory stays empty, and the entry sees `0` with the variable unset,
+a directory, `1` or `0` in the caller's environment.)
 
 **Entry arguments.** `-File` hands the arguments after the script path to PowerShell's
 parameter binding before the script sees them in `$args`: pwsh 7 splits `-x:foo` into
@@ -819,8 +850,9 @@ positional script without `-File`) falls back to `$args`, with the re-parsing ab
 PowerShell command line (Codex's `commandWindows` in a PowerShell session, the polyglot's
 hook line), `--%` is PowerShell's own stop-parsing token and never reaches the native
 call: write `'--%'` (in a `commandWindows` line: not checked on Windows). In the
-polyglot's hook line under PowerShell even `'--%'` is lost, and an argument that begins
-with `-` and contains a blank arrives split (Polyglot, below). (A local run with pwsh 7.7.0 on Linux, not in CI: the 0.1.0 starter
+polyglot's hook line under PowerShell even `'--%'` is lost, and `'-Command x'` arrives
+split; that every argument beginning with `-` and containing a blank splits so is derived
+from that one case (Polyglot, below). (A local run with pwsh 7.7.0 on Linux, not in CI: the 0.1.0 starter
 passed `-x`, `-x`, `foo`, `--`, `-`, `-File`, `-Command`, `a b`, `-x`, `y` for
 `-x -x:foo -- - --% -File -Command 'a b' -x: y`; this one passes
 `-x`, `-x:foo`, `--`, `-`, `--%`, `-File`, `-Command`, `a b`, `$x`, `-x:`, `y`, `-x:$true`,
@@ -839,16 +871,18 @@ with PowerShell's own "argument "name" is not valid" message on stderr and exit 
 `getty-bun: ` line, so no reading of the argument vector can recover it. Which ones
 fail depends on the PowerShell version:
 
-- Windows PowerShell 5.1 called directly rejected a lone `-` (executed: CI 46027293350,
-  the 5.1 leg, `-` followed by `--%` in the list `... "--", "-", "--%", "-File", ...`;
-  CI 46031834399, the 5.1 leg, a lone `-` as the only entry argument) and passed `-:foo`
-  with exit 0 (executed, CI 46031834399, the 5.1 leg).
-- pwsh 7 called directly passed a lone `-` and rejected `-:foo` (executed, CI 46031834399,
-  the pwsh leg).
-- Through the Git Bash forwarding and through the polyglot (both start 5.1): on each leg
-  of CI 46031834399 one forwarding row and three of the six polyglot rows for `-` and
-  `-:foo` exited 0 where 1 was expected; which token passed which path is not determined
-  (`bootstrap/test/windows-dash-limit.test.ts`, `polyglot.test.ts`).
+- Windows PowerShell 5.1 called directly rejected a lone `-`, both as the last argument
+  and followed by another one, and passed `-:foo` with exit 0 (executed, CI 46035250753,
+  the 5.1 leg, `bootstrap/test/windows-dash-limit.test.ts`; earlier CI 46027293350 and
+  46031834399).
+- pwsh 7 called directly passed a lone `-`, last and followed by another argument, and
+  rejected `-:foo` (executed, CI 46035250753, the pwsh leg, the same file).
+- Through the Git Bash forwarding and through the polyglot (both start 5.1), `- x` failed
+  with exit 1 and the binding message: the forwarding on both Windows legs, the polyglot
+  from Windows PowerShell 5.1, pwsh 7 and Git Bash (executed, CI 46035250753,
+  `windows-dash-limit.test.ts`, `polyglot.test.ts`). A lone last `-` and `-:foo` through
+  either: not checked; in CI 46031834399 rows for them exited 0 where 1 was expected, and
+  which token passed which path was not determined, so the suite does not assert them.
 - A dash followed by nothing but blanks: source-checked only (below), not executed.
 
 So on Windows an entry takes no lone `-` and no argument that begins with `-:`. The open
@@ -1011,8 +1045,10 @@ in `hooks.json`:
 - The double quotes keep a root with spaces in one word, in both.
 - `; exit $LASTEXITCODE` is for PowerShell, whose `-Command` turns any non-zero exit code
   of a native last command into 1 (documented for 5.1 and 7; executed with pwsh 7.7.0 on
-  Linux: `sh -c 'exit 2'` as the last command gave 1, with the tail 2). Claude Code's exit
-  2 needs it. A POSIX shell never reaches it, since the polyglot replaces the shell by
+  Linux: `sh -c 'exit 2'` as the last command gave 1, with the tail 2; on Windows the line
+  with the tail gave the entry's 7 and 3 back from Windows PowerShell 5.1 and pwsh 7,
+  executed, CI 46035250753, `bootstrap/test/polyglot.test.ts`; exit 2 through the tail on
+  Windows: not checked). Claude Code's exit 2 needs it. A POSIX shell never reaches it, since the polyglot replaces the shell by
   `exec` or exits. Its limit: when PowerShell cannot find the polyglot, `$LASTEXITCODE` is
   unset and the line exits 0 after PowerShell's error on stderr. How Claude Code hands the
   line to PowerShell, and whether it substitutes `${CLAUDE_PLUGIN_ROOT}` into it before
@@ -1026,12 +1062,16 @@ in `hooks.json`:
   single quotes. On Windows, `cmd.exe` reads the arguments as PowerShell writes them onto
   its command line, so `&`, `|`, `<`, `>`, `^` and `%` there are `cmd.exe`'s: keep them
   out of polyglot lines (not checked). From a PowerShell hook shell (Windows PowerShell
-  5.1 and pwsh 7) `'--%'` does not reach the entry and an argument that begins with `-`
-  and contains a blank (`'-Command x'`) arrives as two (`-Command`, `x`); with Git Bash
-  as the hook shell the same list arrived unchanged (executed, CI 46031834399,
-  `bootstrap/test/polyglot.test.ts`; `cmd.exe` running the `.cmd` itself: checked there
-  for stdin, stdout and exit code only; where PowerShell loses them: not checked). So a polyglot line passes neither; plus the Windows limits of `-File` above
-  (no lone `-`, nothing beginning with `-:`).
+  5.1 and pwsh 7) `'--%'` does not reach the entry and `'-Command x'` arrives as two
+  (`-Command`, `x`); with Git Bash as the hook shell the same list arrived unchanged
+  (executed, CI 46031834399 and 46035250753, `bootstrap/test/polyglot.test.ts`;
+  `cmd.exe /d /c` running the `.cmd` itself: checked there for stdin, stdout and exit
+  code only, with no argument list; where PowerShell loses them: not checked). That any
+  argument beginning with `-` and containing a blank splits so: derived from `-Command x`,
+  the one such argument run. So a polyglot line passes neither `--%` nor such an
+  argument; plus the Windows limits of `-File` above (no lone `-`, nothing beginning with
+  `-:`; `- x` failed through the polyglot from every Windows hook shell, the lone last
+  `-` and `-:foo` there: not checked).
 
 **POSIX side.** The batch part is a here-document to `:` for the shell. The shell part
 then hands the call to `sh <dir>/getty-bun.sh "$@"` by `exec`, so Bun runs under the hook
@@ -1067,7 +1107,14 @@ bash ran, BusyBox failed with the one line; dash without `bash` on `PATH` failed
 one line; `sh getty-bun.cmd` from another directory and from `bootstrap/` ran; zsh 5.9
 (Debian's `zsh-static`) ran the line with exit 2 back and, without `CLAUDE_PLUGIN_ROOT`,
 found the file through `$0`. `bootstrap/test/polyglot.test.ts` passed for `sh`, dash, bash,
-BusyBox sh and zsh: 20 tests. macOS and Git Bash: not checked yet, CI legs pending. The
+BusyBox sh and zsh: 20 tests. macOS: executed, CI 46035250753, the macOS arm64 and x64
+scenario legs, with `/bin/sh` and `/bin/bash` (bash 3.2) and zsh (a zsh row skips when no
+zsh is found, which a green job does not exclude; macOS ships `/bin/zsh`): stdin and
+stdout byte for byte with exit 7, the dash arguments, exit 2 and 7 unchanged, the run
+without `CLAUDE_PLUGIN_ROOT` and a starter failure; dash, installed from Homebrew, failed
+there with the one line and exit 1, as documented for a system without `/proc`. Git Bash:
+executed, CI 46035250753, the Windows legs, the same rows, exit 2 included, plus a root
+with backslashes followed by `/bootstrap/getty-bun.cmd` (bytes and exit 7). The
 first-word gate, a local run outside the suite with a stub `getty-bun.sh` on Linux, not in
 CI: dash re-ran `. "<root>/..."`, `. '<root>/...'`, `. "$VAR/bootstrap/getty-bun.cmd"` and
 `. "$VAR"/bootstrap/getty-bun.cmd` with their arguments; `. ./side.sh; . "<root>/..." run
@@ -1091,9 +1138,15 @@ the user's project. `%~dp0` is the polyglot's own directory, `%*` the arguments 
 (above, "Entry arguments"). LF line endings (`.gitattributes` `eol=lf`): `cmd.exe` runs
 an LF-only batch file line by line, but its label search for `goto` and `call :label` and
 its parenthesised blocks are unreliable there, so the batch part has none of them, and
-`cmd.exe` stops at `exit /b` before it reaches the POSIX part. (Not checked yet: the batch
-side under PowerShell 5.1, 7 and `cmd.exe`, CI legs pending; the cost of the extra
-PowerShell start on a desktop: a windows-developer card.)
+`cmd.exe` stops at `exit /b` before it reaches the POSIX part. (Executed, CI 46035250753,
+the Windows PowerShell 5.1 and pwsh 7 scenario legs, `bootstrap/test/polyglot.test.ts`:
+the batch side dot-sourced from Windows PowerShell 5.1 and pwsh 7 passed stdin and stdout
+byte for byte with exit 7, the entry's arguments (but `'--%'` and `'-Command x'`, Entry
+arguments above), exit 3 without `CLAUDE_PLUGIN_ROOT` and a starter failure as exit 1;
+`cmd.exe /d /c getty-bun.cmd` passed stdin and stdout byte for byte with exit 7, with no
+argument list. Not checked: an argument list given to `cmd.exe /d /c` directly, exit 2 through
+the PowerShell tail, a host that keeps stdin open through the polyglot, and the cost of
+the extra PowerShell start on a desktop: a windows-developer card.)
 
 **Limits of the batch side.** What the environment around `cmd.exe` can do to the line,
 none of it checked on Windows:

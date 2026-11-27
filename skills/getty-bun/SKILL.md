@@ -29,8 +29,9 @@ an entry: skill `getty-bun-integration`.
 `windows-x64-baseline`. On x64 the starter uses whichever of the `-x64` and the
 `-baseline` slot exists, the `-x64` one first, and reads the CPU only when neither does.
 Not supported: musl (Alpine), Windows on ARM; the starter fails with a message naming the
-target. macOS (from agent-bun-runtime 0.2.0): built and checked on Linux only so far; its
-CI legs are pending. Plugins pinned to the same version share one slot;
+target. macOS (from agent-bun-runtime 0.2.0): the scenario suite passed on the CI runners
+`macos-15` (arm64) and `macos-15-intel` (x64), agent-bun-runtime CI 46035250753; a Mac
+desktop and a Rosetta shell: not checked. Plugins pinned to the same version share one slot;
 another version installs beside it. Nothing removes old slots.
 
 ## The starter commands

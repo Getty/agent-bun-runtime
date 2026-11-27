@@ -274,7 +274,14 @@ Evidence:
   for byte and the entry's exit code passed in all; the `-` arguments passed under Git
   Bash, while under both PowerShells `'--%'` was lost and `'-Command x'` arrived split
   (Entry arguments, above).
-- **Pending:** the macOS rows, cited row by row (the macOS jobs of that run passed).
+- **Executed in CI 46035250753, macOS** (the arm64 and x64 scenario legs): `/bin/sh`,
+  `/bin/bash` 3.2 and zsh as the hook shell passed stdin and stdout byte for byte with
+  exit 7, the dash arguments, exit 2 and 7 unchanged, a run without `CLAUDE_PLUGIN_ROOT`
+  and a starter failure as exit 1; dash, which has no `/proc` to re-run the line under
+  bash there, failed with one `getty-bun: ` line and exit 1, as documented. A zsh row
+  would skip if no zsh were found; macOS ships `/bin/zsh`.
+- **Not checked:** exit 2 through the PowerShell `; exit $LASTEXITCODE` tail on Windows,
+  and a host that keeps stdin open through the polyglot.
 - **Executed by windows-developer** (Claude Code 2.1.287): a dot-sourced `.cmd`
   polyglot of this kind starts in shell form (probes q6, r6); not this file, and not its
   Linux side.

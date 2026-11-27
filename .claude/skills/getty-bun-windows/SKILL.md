@@ -10,7 +10,7 @@ Target: native Windows **without** Git Bash. **Measured**: the windows-developer
 `umgebung.md`; Claude Code 2.1.287, Windows 11 25H2, PowerShell 5.1.26100).
 **Documented**, **source-checked**: host docs and source, mostly read by the hub finding
 `docs/windows-referenzen.md` in `agent-developer` (commits pinned there); for our own
-code, `getty-bun.ps1` at `262bc95` with its line. **Executed**: "scenario N" is that
+code, `getty-bun.ps1` at `8fc6133` with its line. **Executed**: "scenario N" is that
 scenario of `bootstrap/test/scenarios.test.ts`, run on the 5.1 and 7 legs of CI
 45603412444; other CI runs are named. All other evidence, unchecked parts included, is in
 [bootstrap/README.md](../../../bootstrap/README.md), "Windows starter". Anything else is
@@ -55,10 +55,13 @@ powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 
 - Entry arguments may start with `-` from 0.2.0: the starter reads
   `[Environment]::GetCommandLineArgs()` after the host's `-File`, not `$args`, which
   `-File`'s parameter binding re-parses (k51; README, Windows starter, entry arguments).
-  Not fixable in the script: `-File` can fail before the script runs on a lone `-`
-  (5.1 direct, CI 46027293350 and 46031834399) and on `-:…` (pwsh 7; 5.1 direct passed
-  it, CI 46031834399; through forwarding and polyglot per token not determined); the polyglot from a PowerShell hook shell loses `'--%'` and splits a
-  `-` argument with a blank (CI 46031834399). README, Windows starter, entry arguments.
+  Not fixable in the script: `-File` can fail before the script runs (exit 1) on a lone
+  `-` (5.1 direct, last or followed by another argument; pwsh 7 direct passes both) and
+  on `-:…` (pwsh 7 direct; 5.1 direct passes it): executed, CI 46035250753. `- x` fails
+  through the forwarding and the polyglot too (same run); a lone last `-` and `-:foo`
+  through either: not checked. The polyglot from a PowerShell hook shell loses `'--%'`
+  and splits `'-Command x'` (CI 46031834399 and 46035250753; any other `-` argument with
+  a blank: derived). README, Windows starter, entry arguments.
 
 ## stdin, stdout, exit code
 
@@ -74,7 +77,7 @@ powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 
 - End when Bun ends, even if the host keeps stdin open: wait for the child and its
   stdout, abandon the stdin copy (executed: scenario 8b).
 - `CreateNoWindow = $true`, so no console window opens for a hook (source-checked,
-  `getty-bun.ps1:420`, `:649`; claude-mem #2869, #3170). Its limit: Ctrl+C in the
+  `getty-bun.ps1:501`, `:758`; claude-mem #2869, #3170). Its limit: Ctrl+C in the
   host's console does not reach Bun, and Bun survives a kill of `powershell.exe` (not
   checked; `k13`).
 - Exit codes: an entry's code on Windows is 0-255, since Bun 1.4.5 exits with the low
@@ -98,11 +101,11 @@ powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 
   `[Net.ServicePointManager]::SecurityProtocol` by `-bor` (.NET Framework may default
   lower; Bun's `install.ps1` sets none) and `$ProgressPreference = 'SilentlyContinue'`
   (the progress bar slows 5.1 downloads drastically); source-checked,
-  `getty-bun.ps1:24`, `:311-324`. No `curl.exe` first. Executed against GitHub: CI
+  `getty-bun.ps1:27`, `:355-375`. No `curl.exe` first. Executed against GitHub: CI
   45603412444, job "real download (windows powershell)".
 - SHA256 from the starter's pin block only, never from `SHASUMS256.txt` or a file next to
   the archive (Bun's `install.ps1` checks none). Hash with
-  `System.Security.Cryptography.SHA256` (`getty-bun.ps1:370-374`): `Get-FileHash` on 5.1
+  `System.Security.Cryptography.SHA256` (`getty-bun.ps1:451-455`): `Get-FileHash` on 5.1
   ignores the script's `ErrorActionPreference`. Executed: scenario 4.
 - Unzip with `System.IO.Compression.ZipFile` (`Add-Type -AssemblyName
   System.IO.Compression.FileSystem` in 5.1). The archive holds exactly the pin's member,
@@ -111,18 +114,18 @@ powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 
   everything. Executed: scenario 5.
 - Probe `bun.exe --version` in staging, before publish. Retry a failed probe once after
   about 1 s (antivirus may hold a fresh `.exe`), never a timed-out one (source-checked,
-  `getty-bun.ps1:445-451`, `:541`; the retry is not checked).
+  `getty-bun.ps1:526-532`, `:650`; the retry is not checked).
 - Open difference from "identical behavior" (card `k19`): `getty-bun.ps1` probes the
   published `bun.exe` a second time after releasing the lock and fails with exit 1,
   leaving the slot as published, if that probe does not pass; the next call takes the
-  fast path (source-checked, `getty-bun.ps1:566-572`). `getty-bun.sh` and the README
+  fast path (source-checked, `getty-bun.ps1:675-681`). `getty-bun.sh` and the README
   have no such second probe.
 
 ## Lock and publish
 
 - `[System.IO.File]::Open($lock, 'OpenOrCreate', 'ReadWrite', 'None')`, kept in a variable
   for the whole critical section and disposed right after publish, before Bun starts
-  again for the entry (`getty-bun.ps1:558-562`; executed: scenario 2b), or in `finally`
+  again for the entry (`getty-bun.ps1:667-671`; executed: scenario 2b), or in `finally`
   on failure. Only the staging probe runs Bun while the lock is held. Waiting is a retry
   loop with a short sleep until the deadline. Not a named mutex (`Local\` is per logon
   session).
@@ -153,7 +156,7 @@ powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 
 
 - Architecture from the environment, not the registry: `PROCESSOR_ARCHITEW6432` (a
   32-bit host process), else `PROCESSOR_ARCHITECTURE`; `AMD64` -> `x64`
-  (source-checked, `getty-bun.ps1:94-101`; `AMD64` executed on every Windows leg). Bun's
+  (source-checked, `getty-bun.ps1:102-110`; `AMD64` executed on every Windows leg). Bun's
   `install.ps1` reads the registry, which its comment says also works under x64
   emulation on ARM64; what the environment shows there: not checked.
 - ARM64: Bun ships native `windows-aarch64` zips from 1.3.10 (source-checked, mise
@@ -164,7 +167,7 @@ powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 
   `x64-baseline`. An x64 probe that dies with `STATUS_ILLEGAL_INSTRUCTION`
   (`-1073741795`) publishes nothing; then install `windows-x64-baseline` under its own
   lock, as Bun's `install.ps1` does. The `Add-Type` check: executed, CI 45572032454
-  (it chose `windows-x64`). The fallback: source-checked (`getty-bun.ps1:583-600`), a
+  (it chose `windows-x64`). The fallback: source-checked (`getty-bun.ps1:692-709`), a
   local run with pwsh 7 on Linux and a fixture probe, not in CI. A CPU without AVX2:
   not checked.
 - Fast path: the first slot that exists of `windows-x64`, then `windows-x64-baseline`,

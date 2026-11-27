@@ -19,7 +19,7 @@ The starters are verified in agent-bun-runtime, not in each consumer. The gate p
 
 These gates prove the codecs against recorded or source-derived payloads, not against a host.
 
-Outside the gates, not checked: any host (Codex, Claude Code); a Windows desktop (Defender real-time protection on, an OEM code page, a proxy, AppLocker or WDAC, Constrained Language Mode); a CPU without AVX2; WSL, musl; macOS (from 0.2.0 the release's CI adds `macos-15` and `macos-15-intel` legs; until a run is cited, not checked); the wget download path; hook cost on `linux-aarch64`.
+Outside the gates, not checked: any host (Codex, Claude Code); a Windows desktop (Defender real-time protection on, an OEM code page, a proxy, AppLocker or WDAC, Constrained Language Mode); a CPU without AVX2; WSL, musl; a Mac desktop and a Rosetta 2 shell (the CI runners `macos-15`, arm64, and `macos-15-intel`, x64, ran the scenario suite, the gate and the per-hook cost in agent-bun-runtime CI 46035250753 at `8fc6133`, and the SDK tests on `macos-15`); the wget download path in CI; hook cost on `linux-aarch64`.
 
 ## Consumer behavior
 

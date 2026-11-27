@@ -34,8 +34,8 @@ Revision history for agent-bun-runtime
   - Contract: the long-lived stdio server (an MCP server) is a second entry
     kind that runs through the starter, with the rules for stdout, signals
     and the install before the first start.
-  - Contract: how an MCP server starts under Codex (no plugin root and no
-    GETTY_HOME in its environment) and under Claude Code.
+  - Contract: how an MCP server starts under Codex (no plugin root, no
+    GETTY_HOME and no CODEX_HOME in its environment) and under Claude Code.
   - Contract: an entry that starts a detached long-lived child process
     follows the rules in dependencies-and-execution.md.
   - Skill getty-bun-install installs getty-bun.cmd beside the starters and

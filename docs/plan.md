@@ -137,7 +137,7 @@ getty-bun.ps1 <same commands>         identical behavior and exit codes
 - Open difference from "identical behavior" (card `k19`): `getty-bun.ps1` probes the
   published `bun.exe` a second time after it has released the lock, and fails with exit 1
   if that probe does not pass, leaving the slot as published; the next call takes the
-  fast path (source-checked, `bootstrap/getty-bun.ps1:566-572`). `getty-bun.sh` and
+  fast path (source-checked, `bootstrap/getty-bun.ps1:675-681`). `getty-bun.sh` and
   `bootstrap/README.md` have no such second probe.
 - Target on the fast path: `getty-bun.sh` detects it on every call (`uname`,
   `/proc/cpuinfo`). `getty-bun.ps1` on x64 does not detect the CPU: it takes the first
