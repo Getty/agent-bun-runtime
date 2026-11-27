@@ -1,0 +1,22 @@
+---
+class: standard
+completed: 2026-11-27T17:29:51Z
+created: 2026-11-27T14:14:33Z
+id: 54
+priority: high
+started: 2026-11-27T14:16:05Z
+status: done
+tags:
+- bootstrap
+- sdk
+- release-0.2.0
+title: 'gettyBun.platforms: schema, pin block line, starters exit 0 on an undeclared
+  platform'
+updated: 2026-11-27T17:29:51Z
+---
+
+Release 0.2.0 (hub card agent-developer k14). Spec: docs/plan.md "Release 0.2.0", ADR 0011. Item 8. loadguard L4/G6. vars.bun_platforms renders '# platforms ...' into the pin block; run, run-ready, ensure exit 0 without download; status state undeclared.
+
+2026-11-27 15:41 Committed cd5edfe (pin line, render, starters), schema 4965637; pushed. CI pending.
+
+Commits on next-0.2.0: cd5edfe, 4965637, 65237bd. CI 46040193580 green on 30401e0; reviewers approved; merge into main pending owner
