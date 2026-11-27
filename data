@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-27T18:38:46Z
+id: 71
+priority: low
+status: backlog
+tags:
+- bootstrap
+- posix
+- macos
+title: 'POSIX starter: no sysctl fork on the darwin-x64 fast path'
+updated: 2026-11-27T18:38:46Z
+---
+
+Hub review 0.2.0 H6: darwin-x64 hook cost ~17 ms, suspected sysctl fork per call (getty-bun.sh, Rosetta check, x86_64 macOS only). Posix worker: slot-first like Linux (darwin-aarch64 slot, then darwin-x64, sysctl only if neither) ~8 lines, plus a fast-target test on macos-15-intel, a README limit line (GETTY_HOME shared between Intel and Apple silicon Macs) and a new measurement. docs/hook-cost.md 'macOS (0.2.0)'.
