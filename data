@@ -1,0 +1,21 @@
+---
+class: standard
+completed: 2026-11-27T17:29:26Z
+created: 2026-11-27T14:14:25Z
+id: 51
+priority: high
+started: 2026-11-27T14:16:08Z
+status: done
+tags:
+- bootstrap
+- windows
+- release-0.2.0
+title: 'Windows starter: pass entry arguments beginning with - unchanged'
+updated: 2026-11-27T17:29:26Z
+---
+
+Release 0.2.0 (hub card agent-developer k14). Spec: docs/plan.md "Release 0.2.0", ADR 0011. Item 4. skilletor F4: -File parameter binding re-parses -x:foo. All starts (-File, Git Bash forwarding, the polyglot). Then rewrite contract.md 'Entry arguments never begin with -'.
+
+2026-11-27 15:41 Committed cd5edfe (GetCommandLineArgs after -File), tests 65237bd, docs 4965637; pushed. Windows CI legs pending.
+
+Commits on next-0.2.0: cd5edfe, 8a972b7, 120d9d4, fb98f86, 8fc6133, 416bdda, 30401e0. CI 46040193580 green on 30401e0; reviewers approved; merge into main pending owner
