@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-27T17:07:15Z
+id: 62
+priority: low
+status: backlog
+tags:
+- ci
+- windows
+title: 'CI: list and assert the scenario suite''s skips on the Windows legs'
+updated: 2026-11-27T17:07:15Z
+---
+
+Windows review of release 0.2.0: the 'No missing-shell skip on Windows' step (ci.yml) only matches two skip reasons; no assert-tests-ran runs over the bootstrap scenario suite's JUnit, so a skip for another reason on Windows passes unseen. Skips by design there: SIGTERM/SIGKILL/leftover-curl rows in resume.test.ts, PID and signal rows in stdio-server.test.ts, the symlink row in paths.test.ts. fast-target.test.ts must never skip there. Proposal: JUnit for the scenario suite plus an allow-list of expected skips. Workflow change: hub push.
