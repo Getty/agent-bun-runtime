@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-27T18:08:58Z
+id: 70
+priority: low
+status: backlog
+tags:
+- bootstrap
+- windows
+title: 'Windows starter: Get-Arguments edge cases (outer script of the same name,
+  .NET 5.1 argv split)'
+updated: 2026-11-27T18:08:58Z
+---
+
+Hub review 0.2.0 H11 (getty-bun.ps1:809-824). Not checked.
