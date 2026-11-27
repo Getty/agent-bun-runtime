@@ -1,6 +1,27 @@
 Revision history for agent-bun-runtime
 
 {{$NEXT}}
+  - Linux x64: the starter takes the slot that already exists, linux-x64
+    first, then linux-x64-baseline, and detects the CPU only when neither
+    is installed.
+  - The starters set BUN_RUNTIME_TRANSPILER_CACHE_PATH=0, so Bun writes no
+    transpiler cache into the user's cache directory.
+  - New command run-ready <entry> [args...]: runs like run when the pinned
+    Bun is installed, and otherwise exits 0 with a note on stderr, without
+    installing anything.
+  - An interrupted download resumes from the partial archive in the store
+    (.downloads) at the next install; a killed starter leaves no download
+    process running.
+  - getty-bun.ps1 passes arguments that start with "-" to the entry
+    unchanged.
+  - macOS: getty-bun.sh supports darwin-x64 and darwin-aarch64 (a shell under
+    Rosetta 2 gets the native Bun) and takes its lock with perl.
+  - bootstrap/getty-bun.cmd: one file that is a batch script for cmd.exe
+    and PowerShell and a shell script for POSIX shells, for Claude Code
+    hooks in shell form on Windows.
+  - The pin block takes an optional "# platforms" line. A starter on a
+    platform it does not list does nothing and exits 0; status reports the
+    state "undeclared".
 
 0.1.0     2026-11-26 23:35:17Z
   - POSIX starter bootstrap/getty-bun.sh with run, ensure and status:

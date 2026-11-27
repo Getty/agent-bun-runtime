@@ -1,9 +1,10 @@
 // Pin render: writes the getty-bun pin block from a version table into starter files.
 //
-//   bun bootstrap/render-pin.ts --table FILE --version V [--check] FILE...
+//   bun bootstrap/render-pin.ts --table FILE --version V [--platforms P,...] [--check] FILE...
 //
 // Rewrites the block between the marker lines in each FILE in place, or with
-// --check exits 1 when a FILE differs from a fresh render. Every failure is one
+// --check exits 1 when a FILE differs from a fresh render. --platforms (linux, darwin,
+// windows; unique, at least one) adds the "# platforms" line after the version line. Every failure is one
 // stderr line beginning with "getty-bun: " and exit 1. Format: bootstrap/README.md.
 import { readFileSync, writeFileSync } from "node:fs";
 
@@ -13,10 +14,13 @@ const TARGETS = [
   "linux-x64",
   "linux-x64-baseline",
   "linux-aarch64",
+  "darwin-x64",
+  "darwin-aarch64",
   "windows-x64",
   "windows-x64-baseline",
 ];
-const USAGE = "usage: render-pin.ts --table FILE --version V [--check] FILE...";
+export const PLATFORMS = ["linux", "darwin", "windows"];
+const USAGE = "usage: render-pin.ts --table FILE --version V [--platforms P,...] [--check] FILE...";
 
 const VERSION_RE = /^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/;
 const ARCHIVE_RE = /^[0-9A-Za-z._-]+\.zip$/;
@@ -32,6 +36,7 @@ function fail(message: string): never {
 function parseArgs(argv: string[]) {
   let table: string | undefined;
   let version: string | undefined;
+  let platforms: string[] | undefined;
   let check = false;
   const files: string[] = [];
   for (let i = 0; i < argv.length; i++) {
@@ -41,6 +46,10 @@ function parseArgs(argv: string[]) {
       if (value === undefined) fail(USAGE);
       if (arg === "--table") table = value;
       else version = value;
+    } else if (arg === "--platforms") {
+      const value = argv[++i];
+      if (value === undefined || platforms !== undefined) fail(USAGE);
+      platforms = value === "" ? [] : value.split(",");
     } else if (arg === "--check") {
       check = true;
     } else if (arg.startsWith("-")) {
@@ -50,7 +59,7 @@ function parseArgs(argv: string[]) {
     }
   }
   if (table === undefined || version === undefined || files.length === 0) fail(USAGE);
-  return { table, version, check, files };
+  return { table, version, platforms, check, files };
 }
 
 function readText(path: string, what: string): string {
@@ -61,7 +70,17 @@ function readText(path: string, what: string): string {
   }
 }
 
-export function renderBlock(tablePath: string, version: string): string {
+// The platforms line's value: each of PLATFORMS at most once, at least one, in the given order.
+export function platformsLine(platforms: string[]): string {
+  if (platforms.length === 0) fail("platforms: at least one of linux, darwin, windows is needed");
+  for (const [i, p] of platforms.entries()) {
+    if (!PLATFORMS.includes(p)) fail(`platforms: unknown platform "${p}" (linux, darwin, windows)`);
+    if (platforms.indexOf(p) !== i) fail(`platforms: ${p} is listed twice`);
+  }
+  return `# platforms ${platforms.join(" ")}`;
+}
+
+export function renderBlock(tablePath: string, version: string, platforms?: string[]): string {
   let table: any;
   try {
     table = JSON.parse(readText(tablePath, "table"));
@@ -81,6 +100,7 @@ export function renderBlock(tablePath: string, version: string): string {
     }
   }
   const lines = [BEGIN, `# version ${version}`];
+  if (platforms !== undefined) lines.push(platformsLine(platforms));
   for (const name of TARGETS) {
     const t = targets[name];
     const where = `table ${tablePath}: version ${version} target ${name}`;
@@ -116,8 +136,8 @@ export function replaceBlock(path: string, text: string, block: string): string 
 }
 
 function main(argv: string[]): number {
-  const { table, version, check, files } = parseArgs(argv);
-  const block = renderBlock(table, version);
+  const { table, version, platforms, check, files } = parseArgs(argv);
+  const block = renderBlock(table, version, platforms);
   const results = files.map((path) => {
     const old = readText(path, "file");
     return { path, old, fresh: replaceBlock(path, old, block) };
