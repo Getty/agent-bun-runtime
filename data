@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-27T18:08:30Z
+id: 64
+priority: medium
+status: backlog
+tags:
+- bootstrap
+- posix
+- windows
+title: 'Starters: clean up stale staging per target under its lock'
+updated: 2026-11-27T18:08:30Z
+---
+
+Hub review of 0.2.0 H1/L10: mktemp creates a new .staging/<id> per install, never cleaned; left after SIGKILL during sha256, unzip or the probe, and after Codex' group kill. Proposal: .staging/<v>/<t>/<id>; under the target's lock delete other entries of the same target, never across targets. Both starters plus scenarios: bigger than a small change, so 0.3.0 (rework item R7).
