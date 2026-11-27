@@ -1,0 +1,24 @@
+---
+class: standard
+completed: 2026-11-27T17:28:22Z
+created: 2026-11-25T04:44:34Z
+depends_on:
+- 2
+id: 4
+priority: medium
+started: 2026-11-27T14:15:55Z
+status: done
+tags:
+- phase-4
+- release-0.2.0
+title: 'Phase 4: macOS bootstrap'
+updated: 2026-11-27T17:28:22Z
+---
+
+macOS in getty-bun.sh: lockf or another lock primitive (no flock by default), shasum -a 256, darwin-x64, darwin-x64-baseline, darwin-aarch64 table entries; CI macos-latest; the phase 1 scenarios on macOS. Windows moved into phase 1 (card 2).
+
+2026-11-27 14:15 Adopted for release 0.2.0 (hub card agent-developer k14), item 5: targets darwin-x64 and darwin-aarch64 (no baseline, see docs/plan.md 'Release 0.2.0'), CI legs on macOS. skilletor and agent-irc releases wait on it.
+
+2026-11-27 15:41 Committed cd5edfe (darwin-x64/darwin-aarch64 rows, signature F3DCC08A8572C0749B3E18888EAB4D40A7B22B59 checked; perl flock lock on macOS), CI legs in workflow commit ab574f8 (hub push pending).
+
+Commits on next-0.2.0: cd5edfe, ab574f8, 416bdda. CI 46040193580 green on 30401e0; reviewers approved; merge into main pending owner
