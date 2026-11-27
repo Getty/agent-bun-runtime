@@ -16,9 +16,11 @@ export type HookHandler = (
 /**
  * What `main()` exits with on failure: `"open"` exits 1, so the host goes on (a
  * `PreToolUse` tool runs); `"closed"` exits 2, which Codex and Claude Code read as a block
- * on `PreToolUse` and `UserPromptSubmit`. Both write the same one stderr line.
+ * on `PreToolUse` and `UserPromptSubmit`; `"silent"` exits 0, so the host goes on and
+ * shows no hook error, and the failure is visible only where stderr is logged. All three
+ * write the same one stderr line.
  */
-export type FailurePolicy = "open" | "closed";
+export type FailurePolicy = "open" | "closed" | "silent";
 
 export interface MainOptions {
   /** One of this package's codecs, e.g. `codex` from `@getty/agent-bun-runtime/codex`. */
@@ -36,7 +38,7 @@ export interface MainOptions {
   readonly cwd?: string;
   /** Bound for the hook object on stdin; default `DEFAULT_MAX_INPUT_BYTES` (1 MiB). */
   readonly maxInputBytes?: number;
-  /** Exit code on failure; default `"open"` (exit 1). */
+  /** Exit code on failure; default `"open"` (exit 1), `"closed"` exit 2, `"silent"` exit 0. */
   readonly onFailure?: FailurePolicy;
 }
 
@@ -48,26 +50,27 @@ const encoder = new TextEncoder();
  * or effects, encodes them as one output and writes stdout once. Returns 0 when the
  * output was encoded and written.
  * Every failure writes exactly one stderr line `agent-bun-runtime: <CODE>: <message>` and
- * returns 1, or 2 with `onFailure: "closed"`; 2 only then, since hosts read 2 as a block.
- * Nothing reaches stdout unless the failure is in writing it (`OUTPUT_FAILED`). An
- * `onFailure` other than `"open"` or `"closed"` is a programming error: `INTERNAL_ERROR`
- * and exit 1, before stdin is read, since the intended policy is unknown.
+ * returns 1, 2 with `onFailure: "closed"` or 0 with `onFailure: "silent"`; 2 only with
+ * `"closed"`, since hosts read 2 as a block. Nothing reaches stdout unless the failure is
+ * in writing it (`OUTPUT_FAILED`). An `onFailure` other than `"open"`, `"closed"` or
+ * `"silent"` is a programming error: `INTERNAL_ERROR` and exit 1, before stdin is read,
+ * since the intended policy is unknown.
  */
 export async function main(options: MainOptions): Promise<number> {
   const writeError = options.stderr ?? writeStderr;
   const policy: unknown = options.onFailure ?? "open";
-  if (policy !== "open" && policy !== "closed") {
+  if (policy !== "open" && policy !== "closed" && policy !== "silent") {
     await report(
       writeError,
       new AgentRuntimeError(
         "INTERNAL_ERROR",
         "input",
-        `main(): onFailure must be "open" or "closed", got ${describeValue(policy)}`,
+        `main(): onFailure must be "open", "closed" or "silent", got ${describeValue(policy)}`,
       ),
     );
     return 1;
   }
-  const failed = policy === "closed" ? 2 : 1;
+  const failed = policy === "closed" ? 2 : policy === "silent" ? 0 : 1;
   let output: Uint8Array;
   try {
     output = await respond(options);

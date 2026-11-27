@@ -280,7 +280,7 @@ describe("onFailure in a real process", () => {
 
   test("an invalid value: exit 1 and INTERNAL_ERROR with nothing on stdin and the pipe open", async () => {
     const run = await runEntry({ chunks: [], env: { ABR_TEST_ON_FAILURE: "CLOSED" } });
-    failure("INTERNAL_ERROR", 'onFailure must be "open" or "closed", got "CLOSED"', run);
+    failure("INTERNAL_ERROR", 'onFailure must be "open", "closed" or "silent", got "CLOSED"', run);
   }, TEST_BOUND_MS);
 });
 

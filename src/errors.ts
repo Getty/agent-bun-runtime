@@ -24,8 +24,8 @@ export type ErrorCode =
 export type ErrorStage = "input" | "decode" | "handler" | "effect" | "encode" | "output";
 
 /**
- * A typed SDK failure. `main()` turns every failure into one stderr line and exit 1, or
- * exit 2 with `onFailure: "closed"`.
+ * A typed SDK failure. `main()` turns every failure into one stderr line and exit 1, exit 2
+ * with `onFailure: "closed"` or exit 0 with `onFailure: "silent"`.
  */
 export class AgentRuntimeError extends Error {
   override readonly name = "AgentRuntimeError";

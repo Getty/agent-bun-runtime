@@ -329,7 +329,7 @@ describe("onFailure", () => {
     expect(outcome.code).toBe(2);
   });
 
-  test("an onFailure other than open or closed: INTERNAL_ERROR, exit 1, stdin never read, handler never run", async () => {
+  test("an onFailure other than open, closed or silent: INTERNAL_ERROR, exit 1, stdin never read, handler never run", async () => {
     for (const value of ["CLOSED", "Open", "", "fail-closed", 2, 0, true, {}, []]) {
       let reads = 0;
       let called = false;
@@ -350,14 +350,14 @@ describe("onFailure", () => {
       expect(outcome.code).toBe(1);
       expect(outcome.stdout).toEqual([]);
       expect(outcome.stderr).toHaveLength(1);
-      expect(outcome.stderr[0]).toMatch(/^agent-bun-runtime: INTERNAL_ERROR: main\(\): onFailure must be "open" or "closed", got [^\r\n]+\n$/);
+      expect(outcome.stderr[0]).toMatch(/^agent-bun-runtime: INTERNAL_ERROR: main\(\): onFailure must be "open", "closed" or "silent", got [^\r\n]+\n$/);
       expect({ value, reads, called }).toEqual({ value, reads: 0, called: false });
     }
   });
 
   test("the invalid value is named in the line", async () => {
     const outcome = await run(() => ({ kind: "no-decision" }), SUBAGENT, { onFailure: "CLOSED" as never });
-    expect(outcome.stderr).toEqual(['agent-bun-runtime: INTERNAL_ERROR: main(): onFailure must be "open" or "closed", got "CLOSED"\n']);
+    expect(outcome.stderr).toEqual(['agent-bun-runtime: INTERNAL_ERROR: main(): onFailure must be "open", "closed" or "silent", got "CLOSED"\n']);
   });
 });
 
