@@ -1,0 +1,20 @@
+---
+class: standard
+completed: 2026-11-27T17:30:26Z
+created: 2026-11-27T14:14:44Z
+id: 58
+priority: high
+started: 2026-11-27T14:16:21Z
+status: done
+tags:
+- ci
+- release-0.2.0
+title: 'CI: publish workflow for trusted publishing'
+updated: 2026-11-27T17:30:26Z
+---
+
+Release 0.2.0 (hub card agent-developer k14). Spec: docs/plan.md "Release 0.2.0", ADR 0011. Item 14. Order of docs/release-0.1.0.md 'After the release'; npm >= 11.5.1, Node >= 22.14.0; 0.2.0 is its first publish. npm side configured by Getty after the workflow is on main. Workflow commits are pushed by the hub.
+
+2026-11-27 15:41 Committed 263a5dd (publish.yml, its own commit); hub push pending. npm side configured by Getty after merge.
+
+Commits on next-0.2.0: 263a5dd. CI 46040193580 green on 30401e0; reviewers approved; merge into main pending owner
