@@ -87,8 +87,8 @@ describe(`item 4: arguments that begin with a dash [${STARTER}]`, () => {
     track(() => server.stop());
     const sb = await sandbox({ mirror: server.url });
     const r = await starter(sb, ["run", "entries/info.ts", ...ENTRY_ARGS]);
+    expectExit(r, 0); // first: a starter that failed before installing must show its own failure, not "did not install"
     expect(server.archives(), "this run did not install").toBe(1);
-    expectExit(r, 0);
     expect(JSON.parse(r.out).argv).toEqual(ENTRY_ARGS);
   });
 

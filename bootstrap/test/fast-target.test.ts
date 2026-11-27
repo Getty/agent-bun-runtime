@@ -27,6 +27,7 @@ import {
   sandbox,
   slotDir,
   snapshot,
+  withoutConfigFile,
   starter,
   startServer,
   track,
@@ -74,7 +75,7 @@ describe(`item 1: the x64 slot choice [${STARTER}]`, () => {
         expect(ranTarget(r.out, target), `the ${target} slot did not run: stdout ${JSON.stringify(r.out)}, stderr ${JSON.stringify(r.err)}`).toBe(true);
         expect(server.total(), "the fast path made a request").toBe(0);
         // nothing but the planted slot exists: no other slot, no lock, no staging
-        const left = await snapshot(join(sb.home, "runtimes"));
+        const left = withoutConfigFile(await snapshot(join(sb.home, "runtimes")));
         expect(left.filter((l) => !l.startsWith(`bun/${REAL_VERSION}/${target}/`) && l !== `bun/` && l !== `bun/${REAL_VERSION}/`)).toEqual([]);
       },
     );
@@ -96,7 +97,7 @@ describe(`item 1: the x64 slot choice [${STARTER}]`, () => {
         expect(r.out).toBe("");
         expect(failureLine(r)).toContain(bad);
         expect((JSON.parse((await starter(sb, ["status"])).out) as StatusJson).state).toBe("mismatch");
-        expect(await snapshot(join(sb.home, "runtimes"))).toEqual(before);
+        expect(withoutConfigFile(await snapshot(join(sb.home, "runtimes")))).toEqual(before);
         expect(server.total()).toBe(0);
       },
     );
@@ -135,7 +136,7 @@ describe(`item 1: the x64 slot choice [${STARTER}]`, () => {
       expect(st.target).toBe(X64);
       expect(st.state).toBe("mismatch");
       expect(samePath(st.slot, bad)).toBe(true);
-      expect(await snapshot(join(sb.home, "runtimes"))).toEqual(before);
+      expect(withoutConfigFile(await snapshot(join(sb.home, "runtimes")))).toEqual(before);
       expect(server.total()).toBe(0);
     },
   );

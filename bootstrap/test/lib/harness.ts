@@ -792,6 +792,19 @@ export async function snapshot(dir: string): Promise<string[]> {
   return out;
 }
 
+/**
+ * A `snapshot(<home>/runtimes)` without the one file getty-bun.ps1 documents creating in `run` and
+ * `ensure` (contract.md, "Bun without the project"): the empty `bun/.config/bunfig.toml` that is
+ * Bun's `--config`. getty-bun.sh uses /dev/null and creates nothing, so there the lines stay and
+ * any such entry still fails. Only exactly that directory and that empty file are dropped; anything
+ * else under `.config/` is still reported. For claims about the slot and the install, not about
+ * "nothing at all is created" (the miss cases keep the strict snapshot of the whole home).
+ */
+export function withoutConfigFile(lines: string[]): string[] {
+  if (STARTER === "sh") return lines;
+  return lines.filter((l) => l !== "bun/.config/" && l !== "bun/.config/bunfig.toml 0");
+}
+
 /** Whatever a failed install may leave: staging holds nothing. */
 export async function stagingLeft(sb: Sandbox): Promise<string[]> {
   return listDir(stagingDir(sb));

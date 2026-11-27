@@ -27,6 +27,7 @@ import {
   samePath,
   sandbox,
   snapshot,
+  withoutConfigFile,
   starter,
   startServer,
   track,
@@ -131,7 +132,7 @@ describe(`item 3: run-ready [${STARTER}]`, () => {
     expectExit(r, 1);
     expect(r.out).toBe("");
     expect(failureLine(r)).toContain(bad);
-    expect(await snapshot(join(sb.home, "runtimes"))).toEqual(before);
+    expect(withoutConfigFile(await snapshot(join(sb.home, "runtimes")))).toEqual(before);
     expect(server.total()).toBe(0);
   });
 

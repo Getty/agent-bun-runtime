@@ -48,7 +48,7 @@ import {
   type Sandbox,
 } from "./lib/harness";
 import { testWhen } from "./lib/when";
-import { DASH_ARGS } from "./lib/args";
+import { DASH_ARGS, POSIX_ONLY_ARGS } from "./lib/args";
 
 const IS_DARWIN = process.platform === "darwin";
 const IS_LINUX = process.platform === "linux";
@@ -217,13 +217,31 @@ describe(`item 6: the .cmd polyglot dot-sourced in shell form [${STARTER}]`, () 
       `${shell.name}: the entry gets its arguments, the dash ones too, and the exit code 0`,
       async () => {
         const { sb } = await installed();
-        const r = await run(shell.argv(shell.words(shell.path(sb), ["run", "entries/info.ts", "a b", "über", ...DASH_ARGS])), {
+        const r = await run(shell.argv(shell.words(shell.path(sb), ["run", "entries/info.ts", "a b", "über", ...DASH_ARGS, ...POSIX_ONLY_ARGS])), {
           env: hookEnv(sb),
           cwd: sb.cwd,
           timeoutMs: 120_000,
         });
         expectExit(r, 0);
-        expect(JSON.parse(r.out).argv).toEqual(["a b", "über", ...DASH_ARGS]);
+        expect(JSON.parse(r.out).argv).toEqual(["a b", "über", ...DASH_ARGS, ...POSIX_ONLY_ARGS]);
+      },
+    );
+
+    // Characterization of Windows PowerShell 5.1's `-File` limit, not of getty-bun: the batch part
+    // starts powershell.exe (5.1) whichever shell dot-sourced the file.
+    if (IS_WIN) for (const arg of ["-", "-:foo"]) shellTest(
+      shell,
+      `${shell.name}: characterization of PowerShell 5.1: the argument ${JSON.stringify(arg)} makes -File fail before the script, exit 1, nothing on stdout`,
+      async () => {
+        const { sb } = await installed();
+        const r = await run(shell.argv(shell.words(shell.path(sb), ["run", "entries/info.ts", arg])), {
+          env: hookEnv(sb),
+          cwd: sb.cwd,
+          timeoutMs: 120_000,
+        });
+        expectExit(r, 1);
+        expect(r.out).toBe("");
+        expect(r.err).toMatch(/argument "name" is not valid/);
       },
     );
 
