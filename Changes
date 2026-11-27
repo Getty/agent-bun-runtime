@@ -26,6 +26,9 @@ Revision history for agent-bun-runtime
     no lone "-" and nothing beginning with "-:". Through getty-bun.cmd from
     a PowerShell hook shell, also pass no "--%" and no "-" argument that
     contains a blank.
+  - getty-bun.cmd re-runs its line under bash only once
+    (GETTY_BUN_POLYGLOT_REEXEC); a "bash" on PATH that is really dash fails
+    with one getty-bun line and exit 1 instead of looping.
   - macOS: getty-bun.sh supports darwin-x64 and darwin-aarch64 (a shell under
     Rosetta 2 gets the native Bun) and takes its lock with perl.
   - bootstrap/getty-bun.cmd: one file that is a batch script for cmd.exe

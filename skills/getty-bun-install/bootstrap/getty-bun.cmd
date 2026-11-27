@@ -18,6 +18,9 @@ exit /b %ERRORLEVEL%
 # is "<sh> -c '. <file> <args>'" (a hook in shell form) and its first word after the "."
 # names getty-bun.cmd, that line runs again under bash, whose "." passes them; never
 # anything but such a line (what came before it would run twice), never from bash or zsh.
+# Only once: GETTY_BUN_POLYGLOT_REEXEC=1 marks the re-run, so a "bash" that is no bash
+# (dash under that name) fails here instead of re-running the line forever; it is removed
+# before getty-bun.sh starts.
 if [ "$#" -eq 0 ] && [ -z "${BASH_VERSION-}${ZSH_VERSION-}" ]; then
   _gb_c=
   if [ -r "/proc/$$/cmdline" ] && command -v bash >/dev/null 2>&1 && command -v xargs >/dev/null 2>&1; then
@@ -43,7 +46,16 @@ if [ "$#" -eq 0 ] && [ -z "${BASH_VERSION-}${ZSH_VERSION-}" ]; then
       case $_gb_r in
         '' | [' 	']*)
           case $_gb_w in
-            getty-bun.cmd | *[/\\]getty-bun.cmd) exec bash -c "$_gb_c" ;;
+            getty-bun.cmd | *[/\\]getty-bun.cmd)
+              if [ -n "${GETTY_BUN_POLYGLOT_REEXEC-}" ]; then
+                printf 'getty-bun: getty-bun.cmd got no arguments with GETTY_BUN_POLYGLOT_REEXEC set: its line already re-ran under the "bash" on PATH (%s), which passed none either (dash under that name?); not re-running it again\n' \
+                  "$(command -v bash)" >&2
+                exit 1
+              fi
+              GETTY_BUN_POLYGLOT_REEXEC=1
+              export GETTY_BUN_POLYGLOT_REEXEC
+              exec bash -c "$_gb_c"
+              ;;
           esac
           ;;
       esac
@@ -75,4 +87,5 @@ if [ -z "$_gb_d" ] || [ ! -f "$_gb_d/getty-bun.sh" ]; then
   printf '\n' >&2
   exit 1
 fi
+unset GETTY_BUN_POLYGLOT_REEXEC
 exec sh "$_gb_d/getty-bun.sh" "$@"
