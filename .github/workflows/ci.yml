@@ -87,12 +87,13 @@ jobs:
             exit 1
           }
           "no parse errors under PowerShell $($PSVersionTable.PSVersion)"
-      - name: Shells for the polyglot test (dash, busybox)
+      - name: Shells for the polyglot test (dash, busybox, zsh)
         # The suite runs getty-bun.cmd under every shell it finds; install them so no leg
         # silently drops one, and fail when a leg still lacks them. macOS ships bash 3.2 as
         # /bin/sh and /bin/bash and no dash; Homebrew has no busybox formula and busybox
         # needs /proc besides, so macOS gets dash only (the suite asserts the documented
-        # dash failure there). The Ubuntu images have dash as /bin/sh.
+        # dash failure there; zsh ships with macOS). The Ubuntu images have dash as /bin/sh
+        # and no zsh, so the Ubuntu legs install it.
         if: runner.os != 'Windows'
         shell: bash
         run: |
@@ -102,8 +103,8 @@ jobs:
             shells="dash bash"
           else
             sudo apt-get update
-            sudo apt-get install -y dash busybox-static
-            shells="dash bash busybox"
+            sudo apt-get install -y dash busybox-static zsh
+            shells="dash bash busybox zsh"
           fi
           for c in $shells; do
             command -v "$c" || { echo "$c is missing on this leg" >&2; exit 1; }
