@@ -3,11 +3,14 @@
 #
 #   sh <root>/bootstrap/getty-bun.sh run <entry> [args...]         ensure, then exec the pinned Bun
 #   sh <root>/bootstrap/getty-bun.sh run-ready <entry> [args...]   as run, but skip (exit 0) if not installed
+#   sh <root>/bootstrap/getty-bun.sh run-mcp <entry> [args...]     as run for a stdio MCP server, never installs:
+#                                                                  waits for the slot, else a stub server
 #   sh <root>/bootstrap/getty-bun.sh ensure                        install the pinned Bun if missing
 #   sh <root>/bootstrap/getty-bun.sh status                        one JSON object on stdout
 #
 # Contract: bootstrap/README.md and docs/plan.md in getty-bun. stdout belongs to the
-# entry; every starter failure is one "getty-bun: " line on stderr and exit 1.
+# entry; every starter failure is one "getty-bun: " line on stderr and exit 1 (run-mcp:
+# the line, then the stub server).
 #
 # >>> getty-bun pin: generated, do not edit >>>
 # version 1.4.5
@@ -24,13 +27,117 @@ default_mirror=https://github.com/oven-sh/bun/releases/download
 nl='
 '
 
+# run-mcp: a host that sees its MCP server end before initialize may block it (Claude
+# Code: about 15 minutes), so in that mode every failure becomes the stub server below.
+mcp=
+pin_version=
+if [ "${1-}" = run-mcp ]; then mcp=1; fi
+
 fail() {
   printf 'getty-bun: %s\n' "$1" >&2
+  if [ -n "$mcp" ]; then mcp_stub "$1"; fi
   exit 1
 }
 
 usage() {
-  fail "usage: getty-bun.sh run <entry> [args...] | run-ready <entry> [args...] | ensure | status"
+  fail "usage: getty-bun.sh run <entry> [args...] | run-ready <entry> [args...] | run-mcp <entry> [args...] | ensure | status"
+}
+
+# The stub: a JSON-RPC server without tools on stdin/stdout, one message per line, until
+# end of input (exit 0). Only the top-level "id" and "method" count (the scan tracks depth
+# and strings); every request gets an answer with its id verbatim, notifications none, a
+# line that is no JSON object is skipped. initialize echoes the client's protocolVersion.
+# shellcheck disable=SC2016 # awk code, expanded by awk
+mcp_stub_awk='
+function jstr(s,   o, i, c, k) {
+  o = ""
+  for (i = 1; i <= length(s); i++) {
+    c = substr(s, i, 1)
+    if (c == "\\" || c == "\"") o = o "\\" c
+    else if ((k = index(ctrl, c)) > 0) o = o sprintf("\\u%04x", k)
+    else o = o c
+  }
+  return "\"" o "\""
+}
+function val(d, t) {
+  if (d == 1 && key[1] == "id") id = t
+  else if (d == 1 && key[1] == "method") method = t
+  else if (d == 2 && inp && key[2] == "protocolVersion") pv = t
+}
+function parse(s,   n, i, j, c, d, t, done) {
+  id = ""; method = ""; pv = ""; inp = 0; d = 0; done = 0
+  n = length(s)
+  for (i = 1; i <= n; i++) {
+    c = substr(s, i, 1)
+    if (c == " " || c == "\t" || c == "\r") continue
+    if (d == 0) {
+      if (done || c != "{") return 0
+      d = 1; obj[1] = 1; expk[1] = 1
+      continue
+    }
+    if (c == "\"") {
+      for (j = i + 1; j <= n; j++) {
+        t = substr(s, j, 1)
+        if (t == "\\") j++
+        else if (t == "\"") break
+      }
+      if (j > n) return 0
+      t = substr(s, i, j - i + 1)
+      i = j
+      if (obj[d] && expk[d]) { key[d] = substr(t, 2, length(t) - 2); expk[d] = 0 }
+      else val(d, t)
+    } else if (c == "{" || c == "[") {
+      d++; obj[d] = c == "{"; expk[d] = obj[d]; key[d] = ""
+      if (d == 2) inp = obj[2] && key[1] == "params"
+    } else if (c == "}" || c == "]") {
+      if (obj[d] != (c == "}")) return 0
+      if (--d == 0) done = 1
+    } else if (c == ",") {
+      expk[d] = obj[d]
+    } else if (c != ":") {
+      for (j = i; j <= n; j++) if (index(",]} \t\r", substr(s, j, 1))) break
+      val(d, substr(s, i, j - i))
+      i = j - 1
+    }
+  }
+  return done
+}
+function reply(r) {
+  printf "{\"jsonrpc\":\"2.0\",\"id\":%s,%s}\n", id, r
+  fflush()
+}
+BEGIN {
+  for (k = 1; k < 32; k++) ctrl = ctrl sprintf("%c", k)
+  info = "\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"getty-bun-stub\",\"version\":" \
+    jstr(ENVIRON["getty_bun_stub_version"]) "},\"instructions\":" jstr(ENVIRON["getty_bun_stub_note"])
+}
+{
+  if (!parse($0) || id !~ /^("|-?[0-9])/ || method !~ /^"/) next
+  m = substr(method, 2, length(method) - 2)
+  gsub(/\\\//, "/", m)
+  if (m == "initialize") {
+    if (pv !~ /^"/) pv = "\"2025-06-18\""
+    reply("\"result\":{\"protocolVersion\":" pv "," info "}")
+  } else if (m == "tools/list") reply("\"result\":{\"tools\":[]}")
+  else if (m == "tools/call") reply("\"result\":{\"content\":[]}")
+  else if (m == "ping") reply("\"result\":{}")
+  else reply("\"error\":{\"code\":-32601,\"message\":\"Method not found\"}")
+}'
+
+# Becomes the stub by exec, so the host's PID answers and a signal ends it by default.
+# The traps go first: BusyBox sh may run its awk applet in this process, handlers kept.
+# mawk reads a pipe in blocks unless -W interactive; other awks answer line by line.
+mcp_stub() {
+  trap - EXIT HUP INT TERM
+  getty_bun_stub_version=${pin_version:-unknown}
+  getty_bun_stub_note="getty-bun could not start this MCP server: $1. It runs as a stub without tools for this session; the real server is there from the next session once that is resolved."
+  LC_ALL=C
+  export getty_bun_stub_version getty_bun_stub_note LC_ALL
+  set -- awk
+  case $(awk -W version 2>/dev/null </dev/null) in
+    mawk*) set -- awk -W interactive ;;
+  esac
+  exec "$@" "$mcp_stub_awk"
 }
 
 # Under Git Bash, MSYS2 and Cygwin the PowerShell starter owns the slot and its lock, so
@@ -108,6 +215,17 @@ on_exit() {
 trap on_exit EXIT
 # Clean up before the message: stderr may already be gone when a host kills the hook.
 trap 'on_exit; fail "stopped by a signal before Bun started"' HUP INT TERM
+# run-mcp ends on a signal with 128 + n, never as a stub; the first handled signal counts
+# (two arriving at once may be handled in signal-number order).
+mcp_signal() {
+  trap '' HUP INT TERM
+  exit "$1"
+}
+if [ -n "$mcp" ]; then
+  trap 'mcp_signal 129' HUP
+  trap 'mcp_signal 130' INT
+  trap 'mcp_signal 143' TERM
+fi
 
 # --- target ------------------------------------------------------------------------
 
@@ -210,6 +328,9 @@ undeclared() {
     printf '{"pin":"%s","target":null,"slot":null,"state":"undeclared"}\n' "$pin_version"
     exit 0
   fi
+  if [ -n "$mcp" ]; then
+    fail "platform $(one_line "$platform") is not declared in the pin of $0 (platforms $pin_platforms); no Bun for $(one_line "$entry")"
+  fi
   _what="$cmd skipped"
   if [ "$cmd" != ensure ]; then _what="$_what $(one_line "$entry")"; fi
   printf 'getty-bun: platform %s is not declared in the pin of %s (platforms %s); %s\n' \
@@ -258,6 +379,26 @@ ensure_slot() {
     mismatch) fail_mismatch ;;
   esac
   install
+}
+
+# run-mcp never installs (no lock, staging or download): it polls the slot about every
+# 0.25 s for at most $mcp_wait seconds, for the install a SessionStart ensure is running.
+mcp_wait_slot() {
+  slot_state
+  _n=$((mcp_wait * 4))
+  while [ "$state" = missing ] && [ "$_n" -gt 0 ]; do
+    if sleep 0.25 2>/dev/null; then
+      _n=$((_n - 1))
+    else
+      sleep 1
+      _n=$((_n - 4))
+    fi
+    slot_state
+  done
+  case $state in
+    missing) fail "Bun $pin_version $target is not installed yet ($slot); run-mcp waited $mcp_wait s for it and serves a stub for $(one_line "$entry")" ;;
+    mismatch) fail_mismatch ;;
+  esac
 }
 
 # --- install -----------------------------------------------------------------------
@@ -536,7 +677,7 @@ esac
 cmd=${1-}
 entry=
 case $cmd in
-  run | run-ready)
+  run | run-ready | run-mcp)
     [ "$#" -ge 2 ] || fail "usage: getty-bun.sh $cmd <entry> [args...]"
     entry=$2
     shift 2
@@ -571,6 +712,20 @@ lock_wait=${GETTY_BUN_LOCK_WAIT-300}
 case $lock_wait in
   '' | *[!0-9]*) fail "GETTY_BUN_LOCK_WAIT must be a whole number of seconds, got '$(one_line "$lock_wait")'" ;;
 esac
+if [ -n "$mcp" ]; then
+  mcp_wait=${GETTY_BUN_MCP_WAIT-20}
+  case $mcp_wait in
+    '' | *[!0-9]*) fail "GETTY_BUN_MCP_WAIT must be a whole number of seconds, got '$(one_line "$mcp_wait")'" ;;
+  esac
+  # No octal in $(( )), no overflow: leading zeros go, more than 6 digits is 999999.
+  while :; do
+    case $mcp_wait in
+      0?*) mcp_wait=${mcp_wait#0} ;;
+      *) break ;;
+    esac
+  done
+  if [ "${#mcp_wait}" -gt 6 ]; then mcp_wait=999999; fi
+fi
 mirror=${GETTY_BUN_MIRROR:-$default_mirror}
 mirror=${mirror%/}
 
@@ -609,7 +764,8 @@ case $cmd in
     ;;
 esac
 
-# run, run-ready: the consumer root is the parent of this starter's directory, never the cwd.
+# run, run-ready, run-mcp: the consumer root is the parent of this starter's directory,
+# never the cwd.
 case $0 in
   */*) _d=${0%/*} ;;
   *) _d=. ;;
@@ -630,6 +786,12 @@ if [ "$cmd" = run-ready ]; then
       ;;
     mismatch) fail_mismatch ;;
   esac
+elif [ -n "$mcp" ]; then
+  mcp_wait_slot
+  # Bun would exit 1 before initialize on a missing entry: the stub instead.
+  if [ ! -f "$root/$entry" ] || [ ! -r "$root/$entry" ]; then
+    fail "entry $(one_line "$root/$entry") is not a readable regular file; run-mcp serves a stub for it"
+  fi
 else
   ensure_slot
 fi

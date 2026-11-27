@@ -4,6 +4,7 @@
 #   powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File <root>\bootstrap\getty-bun.ps1 <command>
 #     run <entry> [args...]         ensure, then run the pinned Bun on <root>\<entry>
 #     run-ready <entry> [args...]   as run, but skip (exit 0) if Bun is not installed yet
+#     run-mcp <entry> [args...]     not supported here: fails (MCP servers on Windows: k13)
 #     ensure                        install the pinned Bun if missing
 #     status                        one JSON object on stdout
 #
@@ -820,9 +821,12 @@ function Invoke-GettyBun([string]$ScriptPath, [string[]]$Argv) {
     $command = ''
     if ($Argv.Count -gt 0) { $command = $Argv[0] }
     # No file name: under Git Bash the user called getty-bun.sh, which forwards here.
-    $usage = 'usage: run <entry> [args...] | run-ready <entry> [args...] | ensure | status'
+    $usage = 'usage: run <entry> [args...] | run-ready <entry> [args...] | run-mcp <entry> [args...] (not on Windows) | ensure | status'
     if ($command -ceq 'run' -or $command -ceq 'run-ready') {
         if ($Argv.Count -lt 2) { Fail ('usage: ' + $command + ' <entry> [args...]') }
+    } elseif ($command -ceq 'run-mcp') {
+        # getty-bun.sh's stdio server mode; here it fails before anything else runs (k13).
+        Fail ('run-mcp is not supported by ' + $ScriptPath + ': MCP servers through the PowerShell starter (and the Git Bash forwarding) are not available yet (k13)')
     } elseif ($command -ceq 'ensure' -or $command -ceq 'status') {
         if ($Argv.Count -ne 1) { Fail $usage }
     } else {

@@ -6,6 +6,14 @@ Revision history for agent-bun-runtime
     is installed.
   - The starters set BUN_RUNTIME_TRANSPILER_CACHE_PATH=0, so Bun writes no
     transpiler cache into the user's cache directory.
+  - New command run-mcp <entry> [args...] (POSIX starter) for long-lived
+    stdio (MCP) servers: runs like run when the pinned Bun is installed,
+    otherwise waits up to GETTY_BUN_MCP_WAIT seconds (default 20) for the
+    slot a SessionStart ensure installs. If there is still none, or
+    anything else fails, it prints one getty-bun line on stderr and serves
+    a stub MCP server without tools until end of input, never ending
+    before initialize (Claude Code blocks a server that does for about 15
+    minutes). Not on Windows: getty-bun.ps1 run-mcp fails with one line.
   - New command run-ready <entry> [args...]: runs like run when the pinned
     Bun is installed, and otherwise exits 0 with a note on stderr, without
     installing anything.
