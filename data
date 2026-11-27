@@ -1,0 +1,25 @@
+---
+class: standard
+completed: 2026-11-27T17:28:44Z
+created: 2026-11-26T23:32:13Z
+id: 46
+priority: medium
+started: 2026-11-27T14:15:58Z
+status: done
+tags:
+- bootstrap
+- posix
+- windows
+- release-0.2.0
+title: 'Starters: set BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 instead of unsetting it
+  (after 0.1.0)'
+updated: 2026-11-27T17:28:44Z
+---
+
+Hub review before the tag, F4. Bun 1.4.5 moves the same transpiler cache through XDG_CACHE_HOME/HOME (RuntimeTranspilerCache.rs:665-690) as through BUN_RUNTIME_TRANSPILER_CACHE_PATH (:648-656). Executed by the hub with harness Bun, starter flags and env -i: a plain 6 KB .ts/.js writes a .pile, a // @bun file writes nothing, so bundled entries (ADR 0003) are unaffected. The unset also drops a deliberate =0 by the user (:649). Proposal: both starters set BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 instead of removing it; closes both. Changes the starters: after 0.1.0. Posix worker defines, windows worker follows in the same task; test writer extends hostile-cwd.test.ts; both reviewers; update the variable table (XDG_CACHE_HOME is not simply harmless).
+
+2026-11-27 14:15 Adopted for release 0.2.0, item 2. Further evidence: skilletor part A 2.4 (93 conformance failures from @t@/*.pile in HOME for non-bundled entries; with =0: pass), loadguard P6 and agent-irc 3.4 (// @bun bundles write nothing; under the starter the cache cannot be switched off because it unsets the variable).
+
+2026-11-27 15:41 Committed cd5edfe (sh and ps1), tests 65237bd; pushed. CI pending.
+
+Commits on next-0.2.0: cd5edfe. CI 46040193580 green on 30401e0; reviewers approved; merge into main pending owner
