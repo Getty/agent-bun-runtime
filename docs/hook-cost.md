@@ -1,7 +1,8 @@
 # agent-bun-runtime: per-hook cost of the starters
 
 The phase 1 gate asks for the per-hook cost on Windows to be measured and recorded. The
-numbers also feed the open decision "Claude Code on Windows" in [plan.md](plan.md).
+numbers also fed the decision "Claude Code on Windows" in [plan.md](plan.md) (decided 2026-11-27,
+[ADR 0010](adr/0010-claude-code-on-windows-cmd-polyglot.md)).
 
 ## Method
 
