@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-27T15:02:14Z
+id: 60
+priority: medium
+status: backlog
+tags:
+- bootstrap
+- posix
+title: 'POSIX starter under busybox-static sh: its own unzip applet breaks the install'
+updated: 2026-11-27T15:02:14Z
+---
+
+Found during release 0.2.0 integration (posix worker): with sh resolving to Debian's busybox-static 1.37.0, busybox runs its own unzip applet ahead of the one on PATH, so every install fails at 'unzip -Z1' (95 of 246 suite tests). getty-bun-core says to run the suite once more under busybox sh, and bootstrap/README.md claims it was tested with busybox sh. Options: call unzip by absolute path, or document busybox as unsupported for installs. Not a 0.2.0 item.
