@@ -16,6 +16,19 @@
       "type": "string",
       "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
       "description": "Exact stable Bun version; no v prefix, ranges, tags, prereleases, or build metadata. Artifact availability and compatibility require separate verification."
+    },
+    "platforms": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "linux",
+          "darwin",
+          "windows"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "Optional: the platforms the consumer runs on. Without it, every platform. The starter reads the rendered # platforms line of its pin block, not this field; the consumer's CI checks that both agree."
     }
   }
 }

@@ -1,7 +1,8 @@
 # Claude Code adapter
 
-Claude Code is served by the codec `@getty/agent-bun-runtime/claude-code` and the POSIX
-starter. The codec is **doc-checked** against the hooks reference
+Claude Code is served by the codec `@getty/agent-bun-runtime/claude-code`, the POSIX
+starter and, for a plugin that runs on Windows too, the polyglot `getty-bun.cmd`. The
+codec is **doc-checked** against the hooks reference
 (https://code.claude.com/docs/en/hooks, fetched 2026-11-26) and **source-checked** against
 the bundled JavaScript of `@anthropic-ai/claude-code` 2.1.332 (never run), with line and
 byte offset in agent-bun-runtime `src/claude-code.ts`. **Executed** only through payloads
@@ -14,14 +15,18 @@ for the entry.
 
 - [Run hooks through the starter](#run-hooks-through-the-starter)
 - [What the codec delivers](#what-the-codec-delivers)
+- [Hot hooks: run-ready and silent guards](#hot-hooks-run-ready-and-silent-guards)
 - [Exit codes in Claude Code](#exit-codes-in-claude-code)
-- [Windows: open decision](#windows-open-decision)
+- [Windows: the dot-sourced polyglot](#windows-the-dot-sourced-polyglot)
+- [MCP servers](#mcp-servers)
 - [Optional repair hint](#optional-repair-hint)
 - [Review activation and validate](#review-activation-and-validate)
 
 ## Run hooks through the starter
 
-`hooks/hooks.json`, Linux (macOS later); shape not executed under Claude Code:
+`hooks/hooks.json` of a plugin that serves Claude Code on Linux and macOS only (on Windows
+too: [the polyglot line](#windows-the-dot-sourced-polyglot)); shape not executed under
+Claude Code:
 
 ```json
 {
@@ -43,15 +48,18 @@ for the entry.
 
 Exec form, without a shell (Claude Code 2.1.139 or later; `sh` resolved on PATH, no
 quoting): `"command": "sh", "args": ["${CLAUDE_PLUGIN_ROOT}/bootstrap/getty-bun.sh", "run",
-"dist/hook.js", "claude-code"]`.
+"dist/hook.js", "claude-code"]`. Either `sh` line stays the line for a Linux/macOS-only
+plugin: it needs neither the polyglot nor its dash workaround.
 
 - The trailing `claude-code` names the host for an entry that serves Codex too
   ([sdk.md](sdk.md), "The entry"). Claude Code always reads `hooks/hooks.json`; Codex
   hooks go into a file of their own ([codex.md](codex.md)).
-- Set `timeout` explicitly on every starter hook, above `GETTY_BUN_LOCK_WAIT` (default
-  300 s) plus one download; 600 is illustrative. Documented ("Common fields"): command
-  hooks default to 600 s, lowered to 30 s on `UserPromptSubmit`, `PreModelSwitch` and
-  `PostModelSwitch` and to 10 s on `MessageDisplay`: too short for a first install.
+- Set `timeout` explicitly on every starter hook that may install (`run`, `ensure`),
+  above `GETTY_BUN_LOCK_WAIT` (default 300 s) plus one download; 600 is illustrative.
+  Documented ("Common fields"): command hooks default to 600 s, lowered to 30 s on
+  `UserPromptSubmit`, `PreModelSwitch` and `PostModelSwitch` and to 10 s on
+  `MessageDisplay`: too short for a first install. A hook that must stay short calls
+  `run-ready` instead ([below](#hot-hooks-run-ready-and-silent-guards)).
 - Never put a starter call on `SessionEnd`: its hooks share a 1.5 s budget, and a timeout
   set on a plugin-provided hook does not raise it (documented, "SessionEnd").
 - Quote `"${CLAUDE_PLUGIN_ROOT}"` in shell form. Measured by windows-developer (Git Bash
@@ -62,7 +70,9 @@ quoting): `"command": "sh", "args": ["${CLAUDE_PLUGIN_ROOT}/bootstrap/getty-bun.
   Code not checked).
 - Measured by windows-developer: Claude Code passes stdout through unchanged and reports
   a non-zero exit with stderr verbatim.
-- No hook requires a Bun on PATH, and there is no separate install hook.
+- No hook requires a Bun on PATH, and there is no separate install hook, except the
+  `SessionStart` `ensure` of a plugin whose MCP server runs through the starter
+  ([MCP servers](#mcp-servers)).
 - The `systemMessage` of a hook declared `"async": true` goes to Claude on the next turn
   instead of the user (documented, `hooks.md:4301`; the codec cannot see the setting):
   never declare a hook async that returns `notify-user`. Whether Claude Code applies a
@@ -99,6 +109,58 @@ The release's README, "The Claude Code codec", has the table with the exact stdo
   (Claude Code parses hook stdout with `JSON.parse`); what happens to it later is not
   checked.
 
+## Hot hooks: run-ready and silent guards
+
+A hook that runs on every tool call or prompt (a guard on `PreToolUse` or
+`UserPromptSubmit`) needs a timeout of a few seconds, too short for a first install: the
+host kills a `run` that is still downloading. From 0.2.0 such a hook calls `run-ready`
+and leaves the install to `SessionStart`:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command",
+        "command": "sh \"${CLAUDE_PLUGIN_ROOT}/bootstrap/getty-bun.sh\" run dist/hook.js claude-code",
+        "timeout": 600 } ] }
+    ],
+    "PreToolUse": [
+      { "matcher": "Bash", "hooks": [ { "type": "command",
+        "command": "sh \"${CLAUDE_PLUGIN_ROOT}/bootstrap/getty-bun.sh\" run-ready dist/guard.js claude-code",
+        "timeout": 5 } ] }
+    ]
+  }
+}
+```
+
+On Windows too, both lines take the polyglot form of
+[the Windows section](#windows-the-dot-sourced-polyglot) with `run` and `run-ready`. A
+`SessionStart` whose entry has nothing to say may call `ensure` instead of `run`.
+
+- `run-ready` with a `ready` slot is exactly `run`. With a `missing` slot it exits 0,
+  writes nothing to stdout and one `getty-bun: ... run-ready skipped <entry>` line to
+  stderr, and installs nothing: no lock, no wait, no download (contract.md, "Starter
+  interface"; starter side executed, `bootstrap/test/run-ready.test.ts`, Linux `sh`). A
+  slot still being installed by `SessionStart` is `missing` to it, so the guard does not
+  wait for the install. `mismatch` and every other starter failure exit 1, as `run`.
+- So until the first install has finished, the guard does nothing and the tool call goes
+  ahead. A guard that must block when Bun is absent cannot use `run-ready`; it keeps `run`
+  with a timeout above the lock wait plus one download.
+- When `SessionStart` is declared `"async": true` (it then returns nothing the session
+  needs), the first tool calls of a fresh session may meet a `missing` slot. Whether
+  Claude Code holds the first turn until a synchronous `SessionStart` has ended is not
+  checked here.
+- 5 s is an example, not a measured bound. On Windows without Git Bash a hook pays two
+  PowerShell starts before Bun (below); leave room for them.
+- For the guard's own failures, `main({ onFailure: "silent" })` (0.2.0, [sdk.md](sdk.md)):
+  every SDK failure (input, handler, effect, encoding) exits 0 with nothing on stdout and
+  the one `agent-bun-runtime: <CODE>: <message>` line on stderr. To Claude Code that is a
+  hook without a decision: no `hook error` notice, the action goes ahead (documented
+  exit 0 behavior, not executed here). Whether the stderr line of an exit 0 hook reaches
+  the user or only the debug log is not checked here. Pick `"silent"` for a guard that
+  fails open and must stay invisible on broken input; `"closed"` (below) for one that
+  fails closed.
+
 ## Exit codes in Claude Code
 
 Documented (hooks reference, 2026-11-26), not executed:
@@ -127,45 +189,135 @@ Documented (hooks reference, 2026-11-26), not executed:
   serves any other event keeps `"open"` (give the guard its own entry). Decisions
   themselves go as JSON with exit 0.
 
-## Windows: open decision
+## Windows: the dot-sourced polyglot
 
-Documented ("Exec form and shell form"):
+Decided on 2026-11-27 (agent-bun-runtime ADR 0010): a Claude Code hook that must run on
+Windows uses **shell form** (no `args`) and dot-sources `bootstrap/getty-bun.cmd`, which
+`getty-bun-install` copies unchanged next to the two starters. The polyglot holds no pin
+and selects no version; it hands the call to `getty-bun.sh` or `getty-bun.ps1`. The line,
+exactly:
 
-- With `args` a command hook runs in **exec form**: `command` is resolved on `PATH` and
-  spawned without a shell; `${CLAUDE_PLUGIN_ROOT}` is substituted into `command` and every
-  `args` element. On Windows `command` must resolve to a real `.exe`. Exec form exists
-  since 2.1.139 (source-checked, `anthropics/claude-code` `4cc5e8b`, `CHANGELOG.md`).
-- Without `args` it runs in **shell form**: `sh -c` on Linux and macOS, Git Bash on
-  Windows, PowerShell when Git Bash is not installed; `"shell": "powershell"` selects
-  PowerShell explicitly.
-- `hooks.json` has no per-OS field: one entry must start on Linux and on Windows alike.
+```
+. "${CLAUDE_PLUGIN_ROOT}/bootstrap/getty-bun.cmd" run dist/hook.js claude-code; exit $LASTEXITCODE
+```
 
-Measured by windows-developer (Claude Code 2.1.287, `docs/hook-start-windows.md`; Git Bash
-could not be hidden, so the PowerShell fallback was measured with `"shell": "powershell"`
-as a stand-in; **Windows without Git for Windows is not measured**):
+in `hooks/hooks.json`:
 
-- Shell form with Git Bash present runs `sh`; `getty-bun.sh` then forwards to
-  `getty-bun.ps1` (forwarding executed in agent-bun-runtime CI, scenario 11; under Claude
-  Code not checked). The target, though, is Windows **without** Git Bash.
-- Exec form with `command: "sh"` depends on the Claude process's PATH; started from
-  PowerShell, `sh` is not found. Exec form on an extensionless script fails with ENOENT,
-  on a `.cmd` with EINVAL.
-- Windows-only entries start (`powershell -NoProfile -ExecutionPolicy Bypass -File ...`,
-  `cmd /c ...`, `node` plus a script), but none serves Linux from the same entry.
-- Two entries start on both without Git Bash: exec form on an extensionless path with a
-  `.exe` next to it (probe y1), or a dot-sourced `.cmd` polyglot in shell form (probes q6,
-  r6), which pays a PowerShell start per hook (about 720 ms on that desktop). Their Linux
-  side was not part of these probes.
+```json
+{
+  "type": "command",
+  "command": ". \"${CLAUDE_PLUGIN_ROOT}/bootstrap/getty-bun.cmd\" run dist/hook.js claude-code; exit $LASTEXITCODE",
+  "timeout": 600
+}
+```
 
-Per-hook cost of the starters over Bun alone, executed in agent-bun-runtime CI
-(`docs/hook-cost.md`, medians): Linux `sh` 5–6 ms; Windows `powershell` 5.1 348–449 ms,
-`pwsh` 7 372–522 ms; Git Bash forwarding about 94 ms more than 5.1 direct. Defender
-real-time protection was off on the runner: a lower bound for desktops.
+`run-ready`, `ensure` and other entries take the same form. Documented ("Exec form and
+shell form"): `hooks.json` has no per-OS field, so one entry must start everywhere; with
+`args` a hook runs in exec form (since 2.1.139, source-checked, `anthropics/claude-code`
+`4cc5e8b`, `CHANGELOG.md`), `command` resolved on `PATH` and spawned without a shell,
+`${CLAUDE_PLUGIN_ROOT}` substituted into `command` and every `args` element; without
+`args` in shell form: `sh -c` on Linux and macOS, Git Bash on Windows, PowerShell when Git
+Bash is not installed (`"shell": "powershell"` selects it explicitly). So the line runs:
 
-The owner decides between a native shim and the polyglot in phase 3b (agent-bun-runtime
-`docs/plan.md`, "Open decisions"). Until then: ship no Claude Code Windows adapter and
-claim no Claude Code support on Windows. The codec itself is platform-independent and runs
-on the Windows CI legs.
+| Platform | Hook shell | Path to Bun |
+|---|---|---|
+| Linux, macOS | `sh -c` | the polyglot's shell part `exec`s `sh getty-bun.sh`; Bun runs under the hook shell's PID |
+| Linux with dash as `/bin/sh` (Debian, Ubuntu) | `sh -c`, then `bash` | dash's `.` drops the arguments; the polyglot reads its shell's command line from `/proc/$$/cmdline` and runs the same line once more under `bash`, then as above. Needs `/proc`, `bash`, `xargs` and the polyglot call first in the line; otherwise exit 1 with one `getty-bun: ` line |
+| Windows with Git Bash | Git Bash `sh` (bash) | shell part, `getty-bun.sh`, which forwards to `getty-bun.ps1` (forwarding executed in CI, scenario 11; under Claude Code not checked) |
+| Windows without Git Bash | PowerShell | PowerShell's `.` runs the `.cmd` through `cmd.exe`; its batch part runs `getty-bun.ps1` under Windows PowerShell 5.1 by absolute path with the Codex `commandWindows` flags and exits with its code |
+
+- **Cost.** Without Git Bash a hook pays one PowerShell start more than Codex's
+  `commandWindows` path: the hook's own PowerShell before the starter's. About 720 ms
+  per PowerShell start on a desktop, measured by windows-developer (Claude Code 2.1.287,
+  `docs/hook-start-windows.md` there) with `"shell": "powershell"` as a stand-in, since Git
+  Bash could not be hidden. A measurement on a real desktop without Git Bash is pending
+  on a windows-developer card. Per-hook cost of the starters over Bun alone, executed in
+  agent-bun-runtime CI (`docs/hook-cost.md`, medians, Defender off: a lower bound): Linux
+  `sh` 5–6 ms; Windows `powershell` 5.1 348–449 ms, `pwsh` 7 372–522 ms; Git Bash
+  forwarding about 94 ms more than 5.1 direct.
+- **The call comes first** in the line: the dash workaround reruns only a line that
+  starts with `. `.
+- **Quote** `"${CLAUDE_PLUGIN_ROOT}/..."`: one word with spaces in both shell families.
+- **`; exit $LASTEXITCODE`** is for PowerShell, whose `-Command` turns every non-zero exit
+  of a native last command into 1; without it a `"closed"` guard's exit 2 arrives as 1. A
+  POSIX shell never reaches the tail (the polyglot `exec`s or exits). Limit: when
+  PowerShell cannot find the polyglot, `$LASTEXITCODE` is unset and the line exits 0
+  after PowerShell's error on stderr, so even a `"closed"` guard fails open there.
+- **Entry arguments:** words that mean the same to `sh` and PowerShell; single-quote
+  anything else, `'--%'` always. Keep `&`, `|`, `<`, `>`, `^` and `%` out of the line:
+  on Windows `cmd.exe` reads the arguments.
+- **Linux/macOS-only plugins** keep the `sh` lines of
+  [the first section](#run-hooks-through-the-starter), shell or exec form. Exec form
+  stays unusable on Windows: `command` must be a real `.exe`; `sh` is not on the PATH of
+  a Claude Code started from PowerShell, and exec form on a `.cmd` fails with EINVAL
+  (measured by windows-developer, 2.1.287).
+- The codec itself is platform-independent and runs on the Windows CI legs.
+
+Evidence:
+
+- **Source-checked:** `bootstrap/getty-bun.cmd` and agent-bun-runtime
+  `bootstrap/README.md`, "Polyglot", for every row of the table.
+- **Executed in agent-bun-runtime's suite, Linux shells:**
+  `bootstrap/test/polyglot.test.ts` runs the line under `<sh> -c` without the host, the
+  root already substituted (it contains a space) and every word single-quoted: stdin and
+  stdout byte for byte, the entry's exit code, arguments beginning with `-`, a starter
+  failure as exit 1 with one line. On 2026-11-27 with the harness Bun 1.4.5 on
+  linux-x64: `sh` (dash), dash and bash passed (13 pass, 7 skip: BusyBox sh and zsh not
+  installed on that machine); with BusyBox 1.37.0 and zsh 5.9 installed all 20 passed
+  (`bootstrap/README.md`). The PowerShell `exit` tail, run by the windows worker with
+  pwsh 7.7.0 on Linux: `sh -c 'exit 2'` as last command gave 1, with the tail 2.
+- **Pending:** the macOS legs and the Windows legs (PowerShell 5.1, 7, Git Bash) of the
+  same test in CI.
+- **Executed by windows-developer** (Claude Code 2.1.287): a dot-sourced `.cmd`
+  polyglot of this kind starts in shell form (probes q6, r6); not this file, and not its
+  Linux side.
+- **Not checked:** that Claude Code substitutes `${CLAUDE_PLUGIN_ROOT}` into the line
+  before PowerShell parses it (else PowerShell reads its own, empty variable and the line
+  exits 0 as above); how Claude Code hands the line to PowerShell; the exit tail under a
+  real host; whether Claude Code's `sh -c` on Linux has exactly the shape the dash
+  workaround needs (`<sh> -c '<line>'`, no extra arguments, nothing before the dot);
+  Windows without Git for Windows at all.
+
+## MCP servers
+
+A plugin's MCP server can run through the starter as a long-lived stdio server
+([contract.md](contract.md), "Long-lived stdio server"; 0.2.0): `.mcp.json` at the plugin
+root, Linux and macOS:
+
+```json
+{
+  "mcpServers": {
+    "example": {
+      "command": "sh",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/bootstrap/getty-bun.sh", "run", "dist/server.js", "claude-code"]
+    }
+  }
+}
+```
+
+or a wrapper of the plugin's own that ends in `exec sh .../getty-bun.sh run dist/server.js
+claude-code`. Shape documented (plugins reference: `.mcp.json`, `${CLAUDE_PLUGIN_ROOT}`
+substituted), not executed under Claude Code here.
+
+- **stdout is the protocol only.** The starter's messages go to stderr, also during a
+  first install, and `getty-bun.sh` `exec`s Bun under the same PID, so the host's signals
+  and end of input reach the server and its exit code passes through (starter side
+  executed, `bootstrap/test/stdio-server.test.ts`, Linux `sh`).
+- **Install before the first start.** Add a `SessionStart` command hook
+  `sh "${CLAUDE_PLUGIN_ROOT}/bootstrap/getty-bun.sh" ensure` with `"timeout": 600`, so the
+  first MCP start finds a ready slot: Claude Code's MCP start timeout may be shorter than
+  an install (its value and `MCP_TIMEOUT` are not checked here). Whether `SessionStart`
+  runs before the MCP servers start is not checked either; a server that starts first
+  waits on the same lock, and if the host gives up on it, an interrupted download is kept
+  and resumed by the next install (0.2.0). The slot is shared: if another consumer has
+  installed the same pin, the server is on the fast path at once.
+- **No starter call on `SessionEnd`** (above): its 1.5 s budget is too short.
+- **No SDK dependency** is needed for such an entry until the SDK has MCP (phase 5).
+- **Windows is not covered.** An MCP server has no shell form, so the polyglot cannot
+  start it, and exec form on a `.cmd` fails with EINVAL (measured by windows-developer,
+  2.1.287). A plugin keeps its server off on Windows (agent-irc keeps its `mcpoff`
+  launcher there); a Windows MCP launcher and a job object that ends Bun with its host are
+  later (agent-bun-runtime `k13`).
 
 ## Optional repair hint
 

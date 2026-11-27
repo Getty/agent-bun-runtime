@@ -30,7 +30,8 @@ you observed it.
 3. Read [the contract](references/contract.md). Missing provider behavior (a target, a
    starter feature, an event or effect the SDK lacks) is built in agent-bun-runtime
    first, not worked around in the consumer. The starter interface is `run`, `ensure`,
-   `status`; invent no other commands.
+   `status` and, from 0.2.0, `run-ready` (`run` that skips instead of installing, for a
+   hook that must never install); invent no other commands.
 4. Establish authorization from the session. Prepare concrete changes before required
    host trust/review; do not bypass it.
 
@@ -46,7 +47,8 @@ you observed it.
   no `bun install` on user machines.
 - One verified installation per exact **version and target within one execution
   environment**, in immutable slots under `<GETTY_HOME>/runtimes`. A mismatch fails
-  closed.
+  closed. From 0.2.0 the targets include `darwin-x64` and `darwin-aarch64`
+  ([paths-platforms.md](references/paths-platforms.md)).
 - **Bun starts without the user's project.** The starters run
   `<slot>/bin/bun --no-install --config=<empty file> --no-env-file <root>/<entry>` with
   `BUN_OPTIONS` and the preload, debugger, module-path and code-cache variables removed
@@ -59,13 +61,17 @@ you observed it.
   `bunx`, or a shebang.
 - stdout belongs to the entry (one hook JSON, written once by `main()`); every diagnostic
   goes to stderr. The starter exits 1 for its own failures and passes the entry's code
-  through unchanged. Entry codes stay within 0–255; no entry argument begins with `-`
-  (both limits come from Windows and hold on every OS).
+  through unchanged. Entry codes stay within 0–255 (a limit from Windows that holds on
+  every OS). Entry arguments pass through unchanged, those beginning with `-` included
+  (from 0.2.0; the 0.1.0 rule against them is withdrawn), except that Bun consumes a lone
+  `--` as the first entry argument and PowerShell drops an empty `''` argument when it
+  calls the `.cmd` ([contract.md](references/contract.md), "Starter interface").
 - **The entry exits 0, 1, or 2 only with `onFailure: "closed"`.** Both hosts read 2 on
   `PreToolUse` and `UserPromptSubmit` as a block, but also act on it elsewhere: on `Stop`
   and `SubagentStop` it keeps the agent working. `"closed"` only on an entry that serves
   nothing but `PreToolUse` or `UserPromptSubmit`; any other entry keeps `"open"` (split
-  the entry when a guard needs `"closed"`).
+  the entry when a guard needs `"closed"`). `"silent"` (from 0.2.0) exits 0 with nothing on
+  stdout for a guard that must stay invisible on broken input ([sdk.md](references/sdk.md)).
 - **The host is passed explicitly**: one entry per host, or the host as the entry's
   argument. Codex sets `CLAUDE_PLUGIN_ROOT` too; never detect the host from the
   environment.
@@ -76,7 +82,9 @@ you observed it.
 
 Merge [package.fragment.json](assets/package.fragment.json); take the version from the
 release's `bootstrap/versions.json` (the fragment shows 1.4.5, the pin of 0.1.0).
-Validate with [requirement.schema.json](assets/requirement.schema.json). Add
+Validate with [requirement.schema.json](assets/requirement.schema.json). A consumer that
+runs only on some OSes declares `gettyBun.platforms` (from 0.2.0;
+[contract.md](references/contract.md), "Canonical consumer requirement"). Add
 `@getty/agent-bun-runtime` at the exact version of the skill source's `ref` (`0.1.0` for
 `v0.1.0`) as a build-time dependency, from npm; a git-commit pin carries no `dist/`.
 
@@ -100,6 +108,11 @@ import { claudeCode } from "@getty/agent-bun-runtime/claude-code";
 process.exit(await main({ codec: claudeCode, handler }));
 ```
 
+A long-lived stdio server (an MCP server) is a second entry kind:
+[contract.md](references/contract.md), "Long-lived stdio server". An entry that starts a
+watcher or background job: [dependencies-and-execution.md](references/dependencies-and-execution.md),
+"Detached long-lived child processes".
+
 ### 4. Bundle the entry
 
 Read [dependencies-and-execution.md](references/dependencies-and-execution.md). Commit the
@@ -110,7 +123,8 @@ bundle; CI rebuilds it with the pinned Bun and compares byte for byte.
 - Codex: [codex.md](references/codex.md): `command` runs `getty-bun.sh`, `commandWindows`
   the PowerShell starter, in a hook file of its own; hook trust and re-review.
 - Claude Code: [claude-code.md](references/claude-code.md): `hooks/hooks.json`, shell or
-  exec form on Linux; Windows is an open decision.
+  exec form on Linux; on Windows the `.cmd` polyglot `getty-bun.cmd` (ADR 0010), whose
+  hook line skill `getty-bun-install` holds.
 - Hermes or another host: no codec exists; it is built in agent-bun-runtime first.
 
 Set every starter hook's `timeout` explicitly, above the lock wait plus one download; put

@@ -12,8 +12,8 @@ Revision history for agent-bun-runtime
   - An interrupted download resumes from the partial archive in the store
     (.downloads) at the next install; a killed starter leaves no download
     process running.
-  - getty-bun.ps1 passes arguments that start with "-" to the entry
-    unchanged.
+  - Entry arguments that start with "-" reach the entry unchanged, also
+    through getty-bun.ps1; the contract no longer forbids them.
   - macOS: getty-bun.sh supports darwin-x64 and darwin-aarch64 (a shell under
     Rosetta 2 gets the native Bun) and takes its lock with perl.
   - bootstrap/getty-bun.cmd: one file that is a batch script for cmd.exe
@@ -25,6 +25,17 @@ Revision history for agent-bun-runtime
   - SDK: main() takes onFailure: "silent". Every failure exits 0 with
     nothing on stdout and the one stderr line, for a guard that must stay
     invisible on broken input.
+  - Consumer requirement: gettyBun.platforms (linux, darwin, windows) in
+    requirement.schema.json declares where a consumer runs.
+  - Contract: the long-lived stdio server (an MCP server) is a second entry
+    kind that runs through the starter, with the rules for stdout, signals
+    and the install before the first start.
+  - Contract: how an MCP server starts under Codex (no plugin root and no
+    GETTY_HOME in its environment) and under Claude Code.
+  - Contract: an entry that starts a detached long-lived child process
+    follows the rules in dependencies-and-execution.md.
+  - Skill getty-bun-install installs getty-bun.cmd beside the starters and
+    renders an optional vars.bun_platforms into the pin block.
 
 0.1.0     2026-11-26 23:35:17Z
   - POSIX starter bootstrap/getty-bun.sh with run, ensure and status:
