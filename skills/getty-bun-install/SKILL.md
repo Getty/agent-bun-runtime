@@ -90,8 +90,10 @@ cp -p "$skill/bootstrap/getty-bun.sh" "$skill/bootstrap/getty-bun.ps1" "$skill/b
 Every hook that needs Bun calls a starter with `run <entry> [args...]`. An entry serving
 both hosts takes the host from its own argument (`claude-code`, `codex`); the SDK never
 guesses it. Entry arguments pass through unchanged, `-` ones included, with one exception
-from Bun 1.4.5: a lone `--` as the first entry argument is dropped; and on Windows
-PowerShell's `-File` rejects a lone `-`, `-:...` and a dash followed only by blanks (skill
+from Bun 1.4.5: a lone `--` as the first entry argument is dropped; and on Windows pass
+no lone `-` and nothing beginning with `-:`, which PowerShell's `-File` can reject, and
+through the polyglot from a PowerShell hook shell no `--%` and no `-` argument containing
+a blank, which arrive lost or split (skill
 `getty-bun-integration`, [contract.md](../getty-bun-integration/references/contract.md),
 "Entry arguments pass through unchanged").
 
@@ -116,13 +118,17 @@ the polyglot ([ADR 0010](https://github.com/Getty/agent-bun-runtime/blob/v0.2.0/
   call first in the line, and fails with one `getty-bun: ` line otherwise. bash (macOS
   `/bin/sh`, Git Bash), BusyBox sh and zsh pass the arguments themselves.
 - Arguments in this line: words that mean the same to `sh` and PowerShell; single-quote
-  anything else, `'--%'` always; keep `&`, `|`, `<`, `>`, `^` and `%` out (on Windows
-  `cmd.exe` reads them).
+  anything else; keep `&`, `|`, `<`, `>`, `^` and `%` out (on Windows `cmd.exe` reads
+  them), and `--%` and `-` arguments containing a blank too (a PowerShell hook shell lost
+  `'--%'` and split `'-Command x'`: executed, agent-bun-runtime CI 46031834399).
 
 Evidence: the line executed locally on Linux under dash 0.5.12 (through bash), bash 5.2.37,
 `bash --posix`, BusyBox sh 1.37.0 and zsh 5.9, root with a space, `-` arguments, stdin and
-exit codes 2 and 7 (agent-bun-runtime `bootstrap/test/polyglot.test.ts`). Not checked yet:
-macOS and the Windows side (PowerShell 5.1, 7 and Git Bash: the release's CI legs), how
+exit codes 2 and 7 (agent-bun-runtime `bootstrap/test/polyglot.test.ts`). On Windows the
+same test ran in CI 46031834399 with PowerShell 5.1, PowerShell 7 and Git Bash as the hook
+shell: stdin, stdout and exit codes passed in all three, the `-` arguments in Git Bash; under
+both PowerShells `'--%'` was lost and `'-Command x'` split (above). Not checked yet:
+macOS (its CI legs passed in that run, not cited row by row), how
 Claude Code hands the line to PowerShell and substitutes `${CLAUDE_PLUGIN_ROOT}` there,
 and the cost on a real Windows desktop (one more PowerShell start per hook, about 720 ms
 measured by windows-developer for probe q6; a measurement card at the windows-developer

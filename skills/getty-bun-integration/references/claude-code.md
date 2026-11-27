@@ -244,8 +244,11 @@ Bash is not installed (`"shell": "powershell"` selects it explicitly). So the li
   PowerShell cannot find the polyglot, `$LASTEXITCODE` is unset and the line exits 0
   after PowerShell's error on stderr, so even a `"closed"` guard fails open there.
 - **Entry arguments:** words that mean the same to `sh` and PowerShell; single-quote
-  anything else, `'--%'` always. Keep `&`, `|`, `<`, `>`, `^` and `%` out of the line:
-  on Windows `cmd.exe` reads the arguments.
+  anything else. Keep `&`, `|`, `<`, `>`, `^` and `%` out of the line: on Windows
+  `cmd.exe` reads the arguments. Keep `--%` and `-` arguments containing a blank out too:
+  under a PowerShell hook shell `'--%'` was lost and `'-Command x'` split (executed,
+  agent-bun-runtime CI 46031834399); no lone `-`, nothing beginning with `-:`
+  ([contract.md](contract.md), "Entry arguments pass through unchanged (from 0.2.0)").
 - **Linux/macOS-only plugins** keep the `sh` lines of
   [the first section](#run-hooks-through-the-starter), shell or exec form. Exec form
   stays unusable on Windows: `command` must be a real `.exe`; `sh` is not on the PATH of
@@ -266,8 +269,12 @@ Evidence:
   installed on that machine); with BusyBox 1.37.0 and zsh 5.9 installed all 20 passed
   (`bootstrap/README.md`). The PowerShell `exit` tail, run by the windows worker with
   pwsh 7.7.0 on Linux: `sh -c 'exit 2'` as last command gave 1, with the tail 2.
-- **Pending:** the macOS legs and the Windows legs (PowerShell 5.1, 7, Git Bash) of the
-  same test in CI.
+- **Executed in CI 46031834399, Windows:** the same test with PowerShell 5.1, PowerShell 7
+  and Git Bash as the hook shell, plus `cmd.exe /d /c` on the `.cmd`: stdin and stdout byte
+  for byte and the entry's exit code passed in all; the `-` arguments passed under Git
+  Bash, while under both PowerShells `'--%'` was lost and `'-Command x'` arrived split
+  (Entry arguments, above).
+- **Pending:** the macOS rows, cited row by row (the macOS jobs of that run passed).
 - **Executed by windows-developer** (Claude Code 2.1.287): a dot-sourced `.cmd`
   polyglot of this kind starts in shell form (probes q6, r6); not this file, and not its
   Linux side.

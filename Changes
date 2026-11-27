@@ -14,9 +14,10 @@ Revision history for agent-bun-runtime
     process running.
   - Entry arguments that start with "-" reach the entry unchanged, also
     through getty-bun.ps1; the contract no longer forbids them. On Windows,
-    PowerShell's -File rejects a lone "-" (Windows PowerShell 5.1), "-:..."
-    and a dash followed only by blanks before the starter runs; pass none
-    of them.
+    PowerShell's -File rejects some of them before the starter runs: pass
+    no lone "-" and nothing beginning with "-:". Through getty-bun.cmd from
+    a PowerShell hook shell, also pass no "--%" and no "-" argument that
+    contains a blank.
   - macOS: getty-bun.sh supports darwin-x64 and darwin-aarch64 (a shell under
     Rosetta 2 gets the native Bun) and takes its lock with perl.
   - bootstrap/getty-bun.cmd: one file that is a batch script for cmd.exe

@@ -35,9 +35,10 @@ Starters (both, identical behavior unless a line says otherwise):
 5. **Entry arguments beginning with `-`** reach the entry unchanged through
    `getty-bun.ps1`, in every supported way of starting it; the rule "entry arguments never
    begin with `-`" is withdrawn. Narrowed before the merge (main session, 2026-11-27, after
-   CI run 46027293350): except the arguments PowerShell's `-File` rejects before the
-   script runs (a lone `-` under Windows PowerShell 5.1; `-:…` or a dash with only blanks
-   under 5.1 and 7); `contract.md` holds the rule.
+   CI runs 46027293350 and 46031834399): on Windows no lone `-` and nothing beginning
+   with `-:` (PowerShell's `-File` rejects such arguments before the script runs), and
+   through the polyglot from a PowerShell hook shell no `--%` and no argument that begins
+   with `-` and contains a blank; `contract.md` holds the rule.
 6. **macOS:** targets `darwin-x64` and `darwin-aarch64` in the version table and both pin
    blocks; `getty-bun.sh` installs them with tools macOS ships.
 7. **Platforms.** `gettyBun.platforms` (optional; `linux`, `darwin`, `windows`) declares

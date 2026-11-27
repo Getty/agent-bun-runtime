@@ -800,12 +800,12 @@ function Invoke-Bun([string]$Exe, [string[]]$Arguments) {
 # C runtime's rules from its command line) is untouched by that. So when this process
 # was started with -File and this script, the arguments are the ones after the script path
 # there; otherwise (the script called inside another PowerShell session) they are $args.
-# Limit: the host itself rejects, before this script runs (exit 1, PowerShell's own
-# "argument "name" is not valid" message), an argument that becomes a parameter with an
-# empty name: a dash followed by ":" (-:foo) or only by blanks, and in Windows PowerShell
-# 5.1 also a lone dash; pwsh 7 takes a lone "-" as a plain argument (source-checked,
-# PowerShell v6.0.0 and master, CommandLineParameterParser.cs, Parameter.cs,
-# MergedCommandParameterMetadata.cs; README, Windows starter, entry arguments).
+# Limit: -File can fail on a dash argument before this script runs (exit 1, PowerShell's
+# own "argument "name" is not valid" message), which no reading of the vector recovers.
+# Windows PowerShell 5.1 called directly rejected a lone "-" (CI 46027293350 and
+# 46031834399) and passed "-:foo" (CI 46031834399); pwsh 7 called directly passed a lone
+# "-" and rejected "-:foo" (CI 46031834399). So on Windows pass no lone "-" and nothing
+# that begins with "-:" (README, Windows starter, entry arguments).
 function Get-Arguments([string]$ScriptPath, [object[]]$Bound) {
     $argv = [Environment]::GetCommandLineArgs()
     $leaf = $ScriptPath.Substring($ScriptPath.LastIndexOfAny([char[]]'\/') + 1)

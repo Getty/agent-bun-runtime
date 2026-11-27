@@ -55,8 +55,10 @@ powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 
 - Entry arguments may start with `-` from 0.2.0: the starter reads
   `[Environment]::GetCommandLineArgs()` after the host's `-File`, not `$args`, which
   `-File`'s parameter binding re-parses (k51; README, Windows starter, entry arguments).
-  Not fixable in the script: `-File` itself rejects a lone `-` on 5.1, and `-:…` or a
-  dash with only blanks on 5.1 and 7, before the script runs (contract.md).
+  Not fixable in the script: `-File` can fail before the script runs on a lone `-`
+  (5.1 direct, CI 46027293350 and 46031834399) and on `-:…` (pwsh 7; 5.1 direct passed
+  it, CI 46031834399; through forwarding and polyglot per token not determined); the polyglot from a PowerShell hook shell loses `'--%'` and splits a
+  `-` argument with a blank (CI 46031834399). README, Windows starter, entry arguments.
 
 ## stdin, stdout, exit code
 

@@ -116,9 +116,12 @@ source-checked, **not executed under Codex**:
   `--%`, `-File` ([contract.md](contract.md), "Starter interface"). Exceptions: a lone
   `--` directly after the entry, which Bun itself consumes, with or without a starter
   (executed against a raw Bun 1.4.5, `bootstrap/test/entry-args.test.ts`, Linux `sh`);
-  and a lone `-`, `-:...` or a dash followed only by blanks, which `powershell.exe -File`
-  rejects before the starter runs (exit 1; source-checked, CI 46027293350 for the lone `-`). The
-  `-File` path is covered by the Windows CI legs of that test, which have not run yet.
+  and a lone `-` or anything beginning with `-:`, which `-File` can reject before the
+  starter runs (exit 1; Windows PowerShell 5.1 rejected a lone `-`, CI 46027293350 and
+  46031834399; `-:foo` failed pwsh 7 and passed 5.1, CI 46031834399; all executed,
+  called directly, not through `commandWindows`). The `-File` path passed the
+  rest of the list on the Windows CI legs of that test (CI 46031834399); the
+  `commandWindows` line itself in a PowerShell session: not checked.
 
 ## Hook facts that shape the adapter
 

@@ -103,8 +103,10 @@ before. What changes on a bump, and what to adopt:
    - an interrupted download resumes from `<GETTY_HOME>/runtimes/bun/.downloads/`, and a
      killed `getty-bun.sh` leaves no `curl`/`wget` running;
    - entry arguments beginning with `-` pass through `getty-bun.ps1` too (except a lone
-     leading `--`, which Bun consumes, and a lone `-`, `-:...` or a dash followed only by
-     blanks, which PowerShell's `-File` rejects on Windows).
+     leading `--`, which Bun consumes; on Windows a lone `-` and anything beginning with
+     `-:`, which PowerShell's `-File` can reject; through the polyglot from a PowerShell
+     hook shell also `--%` and a `-` argument containing a blank, which arrive lost or
+     split).
 4. **New, opt-in:**
    - `run-ready <entry>` for hot hooks with short timeouts (loadguard `PreToolUse` 5 s):
      exits 0 without installing while the slot is missing; keep one `SessionStart` hook

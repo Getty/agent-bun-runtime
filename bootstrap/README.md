@@ -818,28 +818,53 @@ A starter called any other way (with `&` inside another PowerShell session, or a
 positional script without `-File`) falls back to `$args`, with the re-parsing above. In a
 PowerShell command line (Codex's `commandWindows` in a PowerShell session, the polyglot's
 hook line), `--%` is PowerShell's own stop-parsing token and never reaches the native
-call: write `'--%'`. (A local run with pwsh 7.7.0 on Linux, not in CI: the 0.1.0 starter
+call: write `'--%'` (in a `commandWindows` line: not checked on Windows). In the
+polyglot's hook line under PowerShell even `'--%'` is lost, and an argument that begins
+with `-` and contains a blank arrives split (Polyglot, below). (A local run with pwsh 7.7.0 on Linux, not in CI: the 0.1.0 starter
 passed `-x`, `-x`, `foo`, `--`, `-`, `-File`, `-Command`, `a b`, `-x`, `y` for
 `-x -x:foo -- - --% -File -Command 'a b' -x: y`; this one passes
 `-x`, `-x:foo`, `--`, `-`, `--%`, `-File`, `-Command`, `a b`, `$x`, `-x:`, `y`, `-x:$true`,
 `-args` and the empty string as given, `-f` abbreviated works, and `&` inside `-Command`
-falls back. Windows PowerShell 5.1, pwsh on Windows, the forwarding and the polyglot on
-Windows: not checked yet, CI legs pending. Arguments with spaces, quotes, a trailing
-backslash and non-ASCII text: executed, CI 45572032454, before this change.)
+falls back. On Windows: executed, CI 46031834399, Windows PowerShell 5.1 and pwsh 7
+legs: the list `-x`, `-x:foo`, `--`, `--%`, `-File`, `-Command`, `x`, `-Command x`,
+`-NoProfile`, `-ExecutionPolicy`, `Bypass`, `-Verbose`, `-ErrorAction:Stop`, `-Debug`,
+the empty string, `-x:`, `c"d` and `e\` reached the entry unchanged, as a whole, each
+alone and through the Git Bash forwarding (`bootstrap/test/entry-args.test.ts`); the
+polyglot rows: Polyglot, below. Arguments with spaces, quotes, a trailing backslash and
+non-ASCII text: executed, CI 45572032454, before this change.)
 
 What `-File` rejects: it makes an argument after the script path that begins with `-`
-a parameter, and one whose name comes out empty fails in PowerShell before the starter
-runs, with PowerShell's own "argument ... is not valid" message on stderr and exit 1,
-not a `getty-bun: ` line, so no reading of the argument vector can recover it: a dash
-followed by `:` (`-:foo`) or by nothing but blanks, and in Windows PowerShell 5.1 also a
-lone `-`; pwsh 7 takes a lone `-` as a plain argument. 5.1 is what the Git Bash
-forwarding, the polyglot and a Codex `commandWindows` line call, so an entry that runs on
-Windows takes none of these. (Source-checked: PowerShell v6.0.0 and master,
-`CommandLineParameterParser.cs`, with `Parameter.cs` and
-`MergedCommandParameterMetadata.cs`; `getty-bun.ps1`, the comment above `Get-Arguments`.
-The 5.1 failure: executed, CI 46027293350, where the Windows PowerShell 5.1 leg failed
-with an argument list containing a lone `-`; each token on its own: pending the next CI
-run.)
+a parameter, and binding can fail on one of them in PowerShell before the starter runs,
+with PowerShell's own "argument "name" is not valid" message on stderr and exit 1, not a
+`getty-bun: ` line, so no reading of the argument vector can recover it. Which ones
+fail depends on the PowerShell version:
+
+- Windows PowerShell 5.1 called directly rejected a lone `-` (executed: CI 46027293350,
+  the 5.1 leg, `-` followed by `--%` in the list `... "--", "-", "--%", "-File", ...`;
+  CI 46031834399, the 5.1 leg, a lone `-` as the only entry argument) and passed `-:foo`
+  with exit 0 (executed, CI 46031834399, the 5.1 leg).
+- pwsh 7 called directly passed a lone `-` and rejected `-:foo` (executed, CI 46031834399,
+  the pwsh leg).
+- Through the Git Bash forwarding and through the polyglot (both start 5.1): on each leg
+  of CI 46031834399 one forwarding row and three of the six polyglot rows for `-` and
+  `-:foo` exited 0 where 1 was expected; which token passed which path is not determined
+  (`bootstrap/test/windows-dash-limit.test.ts`, `polyglot.test.ts`).
+- A dash followed by nothing but blanks: source-checked only (below), not executed.
+
+So on Windows an entry takes no lone `-` and no argument that begins with `-:`. The open
+source does not explain 5.1: in PowerShell v6.0.0 and master, `CommandLineParameterParser.cs`
+makes every argument after the script that begins with a dash a parameter (master: one
+longer than the dash alone, so pwsh 7 keeps a lone `-` as a plain argument), the name of
+`-` and of `-:foo` comes out empty, and `MergedCommandParameterMetadata.GetMatchingParameter`
+throws on an empty name; `ParameterBinderController` calls it for a parameter with a value
+(`BindParameter`) and for one without, whether or not another argument follows
+(`ReparseUnboundArguments`). That predicts the pwsh 7 results and the 5.1 rejection of
+a lone `-`; read as 5.1, the v6.0.0 code would also fail on `-:foo`, which the 5.1 run
+contradicts. Windows PowerShell 5.1's own source is not published, so why it passes
+`-:foo`: not checked; the rule above avoids both shapes. (Source-checked:
+PowerShell v6.0.0 and master, `CommandLineParameterParser.cs`, `Parameter.cs`,
+`MergedCommandParameterMetadata.cs`, master `ParameterBinderController.cs`; the comment
+above `Get-Arguments` in `getty-bun.ps1`.)
 
 **Limit: no console of its own.** Bun starts with `CreateNoWindow`, so no console
 window opens for a hook. The trade-off: Ctrl+C in the host's console does not reach
@@ -998,9 +1023,15 @@ in `hooks.json`:
   backticks) runs twice under dash, once in dash and once in the bash that re-runs the
   line: keep them out of it.
 - Entry arguments: words that mean the same to `sh` and PowerShell; quote anything else in
-  single quotes, `'--%'` always. On Windows, `cmd.exe` reads the arguments as PowerShell
-  writes them onto its command line, so `&`, `|`, `<`, `>`, `^` and `%` there are
-  `cmd.exe`'s: keep them out of polyglot lines (not checked).
+  single quotes. On Windows, `cmd.exe` reads the arguments as PowerShell writes them onto
+  its command line, so `&`, `|`, `<`, `>`, `^` and `%` there are `cmd.exe`'s: keep them
+  out of polyglot lines (not checked). From a PowerShell hook shell (Windows PowerShell
+  5.1 and pwsh 7) `'--%'` does not reach the entry and an argument that begins with `-`
+  and contains a blank (`'-Command x'`) arrives as two (`-Command`, `x`); with Git Bash
+  as the hook shell the same list arrived unchanged (executed, CI 46031834399,
+  `bootstrap/test/polyglot.test.ts`; `cmd.exe` running the `.cmd` itself: checked there
+  for stdin, stdout and exit code only; where PowerShell loses them: not checked). So a polyglot line passes neither; plus the Windows limits of `-File` above
+  (no lone `-`, nothing beginning with `-:`).
 
 **POSIX side.** The batch part is a here-document to `:` for the shell. The shell part
 then hands the call to `sh <dir>/getty-bun.sh "$@"` by `exec`, so Bun runs under the hook
