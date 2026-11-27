@@ -1,0 +1,19 @@
+---
+class: standard
+completed: 2026-11-27T19:48:53Z
+created: 2026-11-27T18:08:45Z
+id: 66
+priority: high
+started: 2026-11-27T18:09:07Z
+status: done
+tags:
+- bootstrap
+- windows
+- release-0.2.0
+title: 'Polyglot: guard the dash -> bash re-exec against a loop'
+updated: 2026-11-27T19:48:53Z
+---
+
+0.2.0 rework after the hub review (hub card agent-developer k14). R5/H2: bash pointing at dash loops forever (getty-bun.cmd:21,46). Marker GETTY_BUN_POLYGLOT_REEXEC=1; set on entry -> one line, exit 1. Test with a bash on PATH that is dash.
+
+Commits on next-0.2.0: a6ff157, 8713ac5, 8ab12a5. CI 46058085048 green on 5ac9528; reviewers approved; merge into main pending owner
