@@ -1,0 +1,23 @@
+---
+class: standard
+completed: 2026-11-27T17:29:18Z
+created: 2026-11-27T14:14:23Z
+id: 50
+priority: high
+started: 2026-11-27T14:16:01Z
+status: done
+tags:
+- bootstrap
+- posix
+- windows
+- release-0.2.0
+title: 'Starters: run-ready, no orphan download after SIGKILL, resume an interrupted
+  download'
+updated: 2026-11-27T17:29:18Z
+---
+
+Release 0.2.0 (hub card agent-developer k14). Spec: docs/plan.md "Release 0.2.0", ADR 0011. Item 3. loadguard L2c/G2 (P3: SIGKILL during download leaves .staging, .installing and a running curl), agent-irc G3/L2 (an aborted install discards staging, a slow link never finishes). run-ready exits 0 without installing when the slot is missing.
+
+2026-11-27 15:41 Committed cd5edfe (run-ready, .downloads resume, watchdog; ps1 resume with byte-count check), tests 65237bd; pushed. Windows/macOS CI pending. Follow-up k61 (unreaped-starter window).
+
+Commits on next-0.2.0: cd5edfe, 65237bd, 120d9d4. CI 46040193580 green on 30401e0; reviewers approved; merge into main pending owner
