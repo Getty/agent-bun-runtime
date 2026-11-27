@@ -1,0 +1,23 @@
+---
+class: standard
+completed: 2026-11-27T17:28:52Z
+created: 2026-11-26T23:32:16Z
+id: 47
+priority: low
+started: 2026-11-27T14:44:28Z
+status: done
+tags:
+- docs
+- skills
+- release-0.2.0
+title: 'contract.md: the Bun variable cleanup covers the whole process tree'
+updated: 2026-11-27T17:28:52Z
+---
+
+Hub review before the tag, F5. skills/getty-bun-integration/references/contract.md, section "Bun without the project": one sentence that the cleanup applies to the whole process tree. Tools an entry starts (node, npm) lose the user NODE_PATH and NODE_COMPILE_CACHE; debugging with BUN_INSPECT through the starter no longer works. The skill is frozen with v0.1.0: lands in 0.1.1.
+
+2026-11-27 14:15 Adopted for release 0.2.0, item 12.
+
+2026-11-27 15:41 Committed 4965637 (contract.md process-tree sentence); pushed.
+
+Commits on next-0.2.0: 4965637. CI 46040193580 green on 30401e0; reviewers approved; merge into main pending owner
