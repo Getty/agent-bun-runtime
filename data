@@ -1,0 +1,22 @@
+---
+class: standard
+completed: 2026-11-27T17:30:00Z
+created: 2026-11-27T14:14:36Z
+id: 55
+priority: high
+started: 2026-11-27T14:44:25Z
+status: done
+tags:
+- docs
+- skills
+- bootstrap
+- release-0.2.0
+title: 'Contract: entry kind long-lived stdio server, with a scenario'
+updated: 2026-11-27T17:30:00Z
+---
+
+Release 0.2.0 (hub card agent-developer k14). Spec: docs/plan.md "Release 0.2.0", ADR 0011. Item 9. agent-irc G2/L3: lifetime until EOF or signal, stdout only the protocol, isolation flags, exit 0-255, no starter on SessionEnd, MCP consumer adds a SessionStart ensure hook with timeout 600; scenario in bootstrap/test.
+
+2026-11-27 15:41 Committed 4965637 (contract.md 'Long-lived stdio server'), scenario stdio-server.test.ts in 65237bd; pushed.
+
+Commits on next-0.2.0: 4965637, 65237bd. CI 46040193580 green on 30401e0; reviewers approved; merge into main pending owner
