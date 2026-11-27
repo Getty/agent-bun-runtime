@@ -1,0 +1,20 @@
+---
+class: standard
+completed: 2026-11-27T17:30:34Z
+created: 2026-11-27T14:14:48Z
+id: 59
+priority: high
+started: 2026-11-27T15:02:20Z
+status: done
+tags:
+- docs
+- release-0.2.0
+title: docs/release-0.2.0.md and the consumer move from v0.1.0
+updated: 2026-11-27T17:30:34Z
+---
+
+Release 0.2.0 (hub card agent-developer k14). Spec: docs/plan.md "Release 0.2.0", ADR 0011. Item 15. Pattern of docs/release-0.1.0.md plus what consumers change for v0.2.0.
+
+2026-11-27 15:41 Committed 4a8f4bf (docs/release-0.2.0.md); CI run numbers added after the gate.
+
+Commits on next-0.2.0: 4a8f4bf. CI 46040193580 green on 30401e0; reviewers approved; merge into main pending owner
