@@ -2,7 +2,13 @@
 // fixture server, into .dev/fixtures/bun-v<version>/, and verifies each against
 // bootstrap/versions.json. A no-op when the files are present and match.
 //
-//   bun bootstrap/test/fetch-fixtures.ts
+//   bun bootstrap/test/fetch-fixtures.ts                     the targets of this host
+//   bun bootstrap/test/fetch-fixtures.ts darwin-x64 ...      the named targets of the table
+//   bun bootstrap/test/fetch-fixtures.ts --all               every target of the table
+//
+// "This host" is lib/targets.ts: Linux x64 both x64 builds, macOS its one build (darwin-x64 or
+// darwin-aarch64, release 0.2.0 item 5), Windows x64 both. The names and --all let any machine
+// check the darwin (or any other) checksums of bootstrap/versions.json against the release.
 //
 // This is the only place the suite's tooling talks to GitHub.
 
@@ -16,8 +22,23 @@ const BASE = "https://github.com/oven-sh/bun/releases/download";
 const table = loadRealTable();
 await mkdir(FIXTURE_DIR, { recursive: true });
 
+const wanted = process.argv.slice(2);
+const known = Object.keys(table.versions[REAL_VERSION]!.targets);
+let targets: string[];
+if (wanted.length === 0) targets = hostTargets();
+else if (wanted.length === 1 && wanted[0] === "--all") targets = known;
+else {
+  for (const t of wanted) {
+    if (!known.includes(t)) {
+      console.error(`fetch-fixtures: ${t} is not a target of bootstrap/versions.json (${known.join(", ")}) or --all`);
+      process.exit(1);
+    }
+  }
+  targets = wanted;
+}
+
 let failed = false;
-for (const target of hostTargets()) {
+for (const target of targets) {
   const want = archiveInfo(table, REAL_VERSION, target).sha256;
   const file = join(FIXTURE_DIR, `bun-${target}.zip`);
   if (existsSync(file)) {

@@ -15,6 +15,7 @@ import {
   IS_WIN,
   REAL_VERSION,
   STARTER,
+  cleanupAll,
   expectExit,
   exists,
   findGitBashExe,
@@ -33,6 +34,7 @@ import {
 } from "./lib/harness";
 
 setDefaultTimeout(300_000);
+afterEach(cleanupAll); // this file removes its own sandboxes and servers
 
 const ENTRY = `// reports what the project could have changed; cwd must stay the project
 process.stdout.write(JSON.stringify({
@@ -218,8 +220,9 @@ describe(`hostile project cwd (k29) [${STARTER}]`, () => {
 // modules come from than BUN_OPTIONS: BUN_INSPECT_PRELOAD is a preload even under --config and
 // --no-env-file, NODE_PATH adds a resolution root, BUN_INSPECT / BUN_INSPECT_CONNECT_TO start a
 // debugger, NODE_COMPILE_CACHE and BUN_RUNTIME_TRANSPILER_CACHE_PATH choose cache directories,
-// BUN_INTERNAL_WEBVIEW_HOST is macOS-only. The starter removes all seven from the entry's
-// environment. Controls first: a raw Bun with the starter's flags must show the preload, the
+// BUN_INTERNAL_WEBVIEW_HOST is macOS-only. The starter removes six of the seven from the entry's
+// environment and sets BUN_RUNTIME_TRANSPILER_CACHE_PATH to "0" (release 0.2.0, k46: removing it
+// let Bun write its default cache, @t@/*.pile, into the user's cache; "0" turns the cache off). Controls first: a raw Bun with the starter's flags must show the preload, the
 // NODE_PATH package and the cache writes, so a green starter run cannot mean the attack never
 // worked here. The controls set no BUN_INSPECT* and no BUN_INTERNAL_WEBVIEW_HOST (not run raw:
 // the debugger and the macOS host mode are not cheap or portable); those three are covered by the
@@ -328,7 +331,9 @@ async function expectLoadersGone(l: Loaders, r: RunResult): Promise<void> {
   expect(await exists(l.preloadMarker), `the BUN_INSPECT_PRELOAD module ran: ${why}`).toBe(false);
   const seen = JSON.parse(r.out);
   expect(seen.pkg, `the entry resolved a package through NODE_PATH: ${why}`).toBeNull();
-  expect(seen.env, `the entry sees loader variables: ${why}`).toEqual(Object.fromEntries(LOADER_VARS.map((n) => [n, null])));
+  expect(seen.env, `the entry sees loader variables: ${why}`).toEqual(
+    Object.fromEntries(LOADER_VARS.map((n) => [n, n === "BUN_RUNTIME_TRANSPILER_CACHE_PATH" ? "0" : null])),
+  );
   expect(await dirEntries(l.transpilerCache), `the transpiler cache was written: ${why}`).toEqual([]);
   expect(await dirEntries(l.compileCache), `the compile cache was written: ${why}`).toEqual([]);
 }
@@ -357,6 +362,87 @@ describe(`loader environment variables (k40) [${STARTER}]`, () => {
     expect(server.total(), "the fast path made a request").toBe(requests);
     await expectLoadersGone(l, r);
   });
+});
+
+// k46 (release 0.2.0 item 2): both starters export BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 to Bun,
+// whatever the caller had set, and a non-bundled entry then writes no transpiler cache (`@t@/*.pile`,
+// which Bun puts under XDG_CACHE_HOME, else HOME, Windows: LOCALAPPDATA or TEMP) into the user's
+// cache dirs. The sandbox scopes those dirs to itself (k43), so a stray .pile anywhere in the
+// sandbox is the leak. The control runs the slot's Bun raw with the same environment and must
+// write one: a green starter run cannot mean the cache never works here.
+async function piles(dir: string): Promise<string[]> {
+  const out: string[] = [];
+  for await (const f of new Bun.Glob("**/*.pile").scan({ cwd: dir, dot: true, onlyFiles: true })) out.push(f);
+  return out.sort();
+}
+
+async function expectRawBunWritesCache(sb: Sandbox, bunPath: string): Promise<void> {
+  const emptyConfig = join(sb.tmp, "empty-bunfig-k46.toml");
+  await writeFile(emptyConfig, "");
+  const env = { ...sb.env };
+  delete env.BUN_RUNTIME_TRANSPILER_CACHE_PATH;
+  delete env.NODE_ENV;
+  const r = await run([bunPath, "--no-install", `--config=${emptyConfig}`, "--no-env-file", join(sb.root, "entries", "padded.ts")], {
+    env,
+    cwd: sb.cwd,
+    timeoutMs: 60_000,
+  });
+  const why = `control (raw ${bunPath}) exit ${r.code}, stderr ${JSON.stringify(r.err)}`;
+  expect(r.code, why).toBe(0);
+  expect(await piles(sb.tmp), `a raw Bun wrote no .pile into the sandbox's cache dirs: ${why}`).not.toEqual([]);
+  for (const f of await piles(sb.tmp)) await rm(join(sb.tmp, f), { force: true });
+  expect(await piles(sb.tmp)).toEqual([]);
+}
+
+describe(`transpiler cache is off (k46) [${STARTER}]`, () => {
+  test("installing first run: a non-bundled entry writes no .pile into the sandbox's cache dirs", async () => {
+    const server = await serverFor();
+    const sb = await sandbox({ mirror: server.url });
+    const st = await install(sb);
+    await expectRawBunWritesCache(sb, slotBun(st.slot)); // the control needs a Bun; the slot's is the one under test
+    await rm(join(sb.home), { recursive: true, force: true }); // back to a fresh install for the run under test
+    const before = server.archives();
+
+    const r = await starter(sb, ["run", "entries/padded.ts"], { env: { BUN_RUNTIME_TRANSPILER_CACHE_PATH: null } });
+    expect(server.archives(), "this run did not install").toBe(before + 1);
+    expectExit(r, 0);
+    expect(r.out).toBe("padded\n");
+    expect(await piles(sb.tmp), "the starter's Bun wrote a transpiler cache").toEqual([]);
+  });
+
+  test("fast path: the same, and the caller's own cache directory stays empty", async () => {
+    const server = await serverFor();
+    const sb = await sandbox({ mirror: server.url });
+    const st = await install(sb);
+    await expectRawBunWritesCache(sb, slotBun(st.slot));
+    const callerCache = join(sb.tmp, "caller-cache");
+    await mkdir(callerCache, { recursive: true });
+
+    const r = await starter(sb, ["run", "entries/padded.ts"], { env: { BUN_RUNTIME_TRANSPILER_CACHE_PATH: callerCache } });
+    expectExit(r, 0);
+    expect(await piles(sb.tmp), "the starter's Bun wrote a transpiler cache").toEqual([]);
+    expect(await dirEntries(callerCache)).toEqual([]);
+  });
+
+  for (const [label, value] of [
+    ["unset", null],
+    ["a directory", "DIR"],
+    ["1", "1"],
+    ["0", "0"],
+  ] as const) {
+    test(`the entry sees BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 when the caller set it ${label}`, async () => {
+      const server = await serverFor();
+      const sb = await sandbox({ mirror: server.url });
+      const set = value === "DIR" ? join(sb.tmp, "caller-cache") : value;
+      const first = await starter(sb, ["run", "entries/cachevar.ts"], { env: { BUN_RUNTIME_TRANSPILER_CACHE_PATH: set } });
+      expect(server.archives(), "the first run did not install").toBe(1);
+      expectExit(first, 0);
+      expect(JSON.parse(first.out)).toEqual({ cache: "0" });
+      const fast = await starter(sb, ["run", "entries/cachevar.ts"], { env: { BUN_RUNTIME_TRANSPILER_CACHE_PATH: set } });
+      expectExit(fast, 0);
+      expect(JSON.parse(fast.out)).toEqual({ cache: "0" });
+    });
+  }
 });
 
 // The probe side: BUN_OPTIONS=--help replaces `bun --version` output with the help text, so a
