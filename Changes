@@ -23,7 +23,9 @@ Revision history for agent-bun-runtime
   - Entry arguments that start with "-" reach the entry unchanged, also
     through getty-bun.ps1; the contract no longer forbids them. On Windows,
     PowerShell's -File rejects some of them before the starter runs: pass
-    only options of the form -x, --name or --name=value, without blanks.
+    only options of the form -x, --name or --name=value, without blanks;
+    in a hook line write a value only of letters, digits and . _ - / :,
+    single-quoted (% and ^ hit the polyglot's limit).
   - getty-bun.cmd re-runs its line under bash only once
     (GETTY_BUN_POLYGLOT_REEXEC); a "bash" on PATH that is really dash fails
     with one getty-bun line and exit 1 instead of looping.

@@ -113,14 +113,16 @@ source-checked, **not executed under Codex**:
   `"open"` (exit 1) shows the failure and goes on; `"closed"` blocks (below).
 - **Entry arguments beginning with `-`** (0.2.0) reach the entry unchanged through
   `commandWindows` too, although `getty-bun.ps1` runs under `-File`: `-x`, `-x:foo`, `--`,
-  `--%`, `-File` ([contract.md](contract.md), "Starter interface"). Exceptions: a lone
-  `--` directly after the entry, which Bun itself consumes, with or without a starter
+  `--%`, `-File`, `--name`, `--name=value` ([contract.md](contract.md), "Starter
+  interface"). Exceptions: a lone `--` directly after the entry, which Bun itself
+  consumes, with or without a starter
   (executed against a raw Bun 1.4.5, `bootstrap/test/entry-args.test.ts`, Linux `sh`);
   and a lone `-` or anything beginning with `-:`, which `-File` can reject before the
   starter runs (exit 1; Windows PowerShell 5.1 rejected a lone `-`, CI 46027293350 and
   46031834399; `-:foo` failed pwsh 7 and passed 5.1, CI 46031834399; all executed,
   called directly, not through `commandWindows`). The `-File` path passed the
-  rest of the list on the Windows CI legs of that test (CI 46031834399); the
+  rest of the list on the Windows CI legs of that test (CI 46031834399; `--name`,
+  `--name=value` and `--name=a:b` added, CI 46055182446); the
   `commandWindows` line itself in a PowerShell session: not checked.
 
 ## Hook facts that shape the adapter
@@ -245,8 +247,9 @@ in substance at `57b493a` (main, 2026-11-27); file and line below are from `3d2e
 So the consumer carries a locator: a `sh -c` one-liner in its Codex MCP declaration
 (`.mcp.json` at the plugin root, or the file the Codex manifest's `mcpServers` names)
 that finds the newest installed copy of its own starter and `exec`s it in the starter's
-`run-mcp` mode (in `getty-bun.sh` from the 0.2.0 rework; executed locally on Linux `sh`,
-`bootstrap/test/run-mcp.test.ts`; the CI legs are pending). For a
+`run-mcp` mode (in `getty-bun.sh` from the 0.2.0 rework; executed locally on Linux `sh`
+and on the POSIX legs of CI 46055182446, linux-x64, linux-arm64, macos-15 and
+macos-15-intel, `bootstrap/test/run-mcp.test.ts`; not run under Codex). For a
 plugin named `example`:
 
 ```json
@@ -296,7 +299,10 @@ Limits:
   platform `getty-bun.sh` serves its stub on POSIX, but on Windows `getty-bun.ps1 run-mcp`
   fails with exit 1 before it reads the pin (`k13`), and the Git Bash forwarding hands
   `run-mcp` to it before its own platforms check (source-checked, `bootstrap/getty-bun.ps1`
-  and `bootstrap/getty-bun.sh`).
+  and `bootstrap/getty-bun.sh`). The failure itself, through `-File` and through the
+  forwarding (exit 1, nothing on stdout, one `getty-bun: ` line naming `k13`, nothing
+  created under `GETTY_HOME`): executed on both Windows legs of CI 46055182446,
+  `bootstrap/test/run-mcp.test.ts`, with a declared platform; not run under Codex.
 - **stdout is the protocol only.** The starter writes its messages to stderr, also during
   a first install, and its exit code passes through (starter side executed,
   `bootstrap/test/stdio-server.test.ts`, Linux `sh`). Nothing in the locator writes to
@@ -318,8 +324,9 @@ So the first session after an install has the real server only if that `ensure` 
 within the wait. Otherwise, and on every other failure (mismatch, invalid settings,
 broken pin, unsupported platform), `run-mcp` writes one `getty-bun: ` line to stderr and
 answers as a stub server without tools until the end of input. The starter side of this
-paragraph is executed on Linux `sh` (`bootstrap/test/run-mcp.test.ts`, CI not yet run),
-except the broken pin, which that suite does not check; under a real host: not executed.
+paragraph is executed on Linux `sh` locally and on the POSIX legs of CI 46055182446
+(`bootstrap/test/run-mcp.test.ts`), except the broken pin, which that suite does not
+check; not run under Codex or any other real host.
 Under Codex the stub does no harm: Codex keeps no cache that blocks the server, and the next session
 starts it again and finds the slot `ensure` installed (K9, Codex 0.148.0: after a start
 timeout the next session installed and ran). Nothing resumes an aborted start; it is

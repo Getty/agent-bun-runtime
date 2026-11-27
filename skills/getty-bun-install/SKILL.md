@@ -147,9 +147,13 @@ the polyglot ([ADR 0010](https://github.com/Getty/agent-bun-runtime/blob/v0.2.0/
 
 Evidence: the line executed locally on Linux under dash 0.5.12 (through bash), bash 5.2.37,
 `bash --posix`, BusyBox sh 1.37.0 and zsh 5.9, root with a space, `-` arguments, stdin and
-exit codes 2 and 7 (agent-bun-runtime `bootstrap/test/polyglot.test.ts`). On Windows the
+exit codes 2 and 7 (agent-bun-runtime `bootstrap/test/polyglot.test.ts`); in CI 46055182446
+on linux-x64 and linux-arm64 the same test under `sh` (dash), dash, bash, BusyBox sh and zsh,
+with `--name`, `--name=value` and `--name=a:b` among the arguments and the dash re-run
+guard (a `bash` on `PATH` that is dash ends with one line, exit 1). On Windows the
 same test ran in CI 46031834399 with PowerShell 5.1, PowerShell 7 and Git Bash as the hook
-shell: stdin, stdout and exit codes passed in all three, the `-` arguments in Git Bash; under
+shell: stdin, stdout and exit codes passed in all three, the `-` arguments in Git Bash (and,
+in CI 46055182446, `--name`, `--name=value` and `--name=a:b` from all three); under
 both PowerShells `'--%'` was lost and `'-Command x'` split (above); CI 46035250753 repeated
 that and showed a `-` followed by another argument failing with exit 1 from all three hook
 shells (the batch part starts Windows PowerShell 5.1). On macOS (`macos-15` and
@@ -246,9 +250,10 @@ and the install beside it, a `SessionStart` hook `ensure` with timeout 600:
   "Long-lived stdio server".
 - Not on Windows in 0.2.0: `getty-bun.ps1 run-mcp` fails with one line, exit 1 (`k13`).
 
-`run-mcp` is executed locally in agent-bun-runtime (`bootstrap/test/run-mcp.test.ts`, Linux
-`sh`), not yet under a host; the host facts are hub-observed (agent-developer and agent-irc
-K9, 2026-11-27, Claude Code 2.1.332, Codex 0.148.0; details in
+`run-mcp` is executed in agent-bun-runtime CI 46055182446 (`bootstrap/test/run-mcp.test.ts`:
+the Linux and macOS legs; on Windows the `k13` failure through `-File` and the Git Bash
+forwarding), not run under a real host (the hub checks it); the host facts are
+hub-observed (agent-developer and agent-irc K9, 2026-11-27, Claude Code 2.1.332, Codex 0.148.0; details in
 [claude-code.md](../getty-bun-integration/references/claude-code.md)).
 
 The hook lines are source-checked against the hosts, not executed under them by this

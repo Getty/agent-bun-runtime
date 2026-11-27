@@ -672,7 +672,8 @@ there, Linux x64; not repeated here).
   are the reasons. Under Git Bash, MSYS and Cygwin the starter still forwards to
   `getty-bun.ps1`, which ends `run-mcp` with one line and exit 1 (`k13`); only a failure
   of the forwarding itself (no `getty-bun.ps1`, no `cygpath`, no PowerShell) becomes the
-  stub there.
+  stub there (source-checked; under Git Bash not executed: MSYS `awk` and its PID and
+  signal semantics are not checked).
 
 The stub is POSIX `awk`, started by `exec`, so the host's PID answers; `LC_ALL=C`, and
 mawk gets `-W interactive`, without which it reads a pipe in blocks and answers nothing
@@ -713,9 +714,16 @@ first) and `zsh` as `sh`, with mawk 1.3.4 and BusyBox `awk`: the scenario rows o
 `initialize`, `notifications/initialized`, `tools/list`, `tools/call` with `"id"` and
 `"method"` inside the arguments in both key orders, `ping`, an unknown method, garbage
 and end of input; TERM, INT and HUP in the stub ended it within 2 ms (exit 143, 130,
-129 by the signal), during the wait within about 0.2 s. Not checked: the one-true-awk of
-macOS (it reads through stdio, which returns what a pipe holds, as gawk does; neither
-ran here), gawk, and a real host against the stub (the hub's probe used its own sh stub).
+129 by the signal), during the wait within about 0.2 s. In CI: executed, CI 46055182446
+at `dce4797`, `bootstrap/test/run-mcp.test.ts` on the four POSIX scenario legs: the
+ready, missing-slot, missing-entry, stub and signal rows on linux-x64 and linux-arm64
+with the runner's `awk`, and on `macos-15` and `macos-15-intel` with the runner's `awk`
+(the one-true-awk of macOS: source-checked, the runner-image READMEs list no gawk; no CI
+step records which awk ran); on all four the stub transcript also under bash and zsh as
+`sh`; the BusyBox `sh` rows (transcript, signals in the stub and during the wait) on the
+two Linux legs only, where CI installs BusyBox. Not checked: gawk, the timing of a long
+line in the one-true-awk (above), and a real host against the stub: not run under a real
+host (the hub checks it; its probe used its own sh stub).
 
 **Download.** Under the install lock the archive downloads to
 `<GETTY_HOME>/runtimes/bun/.downloads/<version>/<target>/<archive>.part`, resumed when
@@ -864,8 +872,12 @@ environment or the pin: no lock, staging, download or `GETTY_HOME`. MCP servers 
 the PowerShell starter, the Git Bash forwarding (which hands `run-mcp` to it unchanged)
 included, belong to `k13`. The usage line names the command with "(not on Windows)".
 (Executed on Linux with pwsh 7.7 only: the line and exit 1 for `run-mcp`, `run-mcp
-server.js` and `run-mcp server.js -x`, no `GETTY_HOME` afterwards. On Windows: not
-checked until the scenario suite's test for it runs in CI.)
+server.js` and `run-mcp server.js -x`, no `GETTY_HOME` afterwards. On Windows: executed,
+CI 46055182446, the Windows PowerShell 5.1 and pwsh 7 scenario legs,
+`bootstrap/test/run-mcp.test.ts`: `run-mcp entries/info.ts` through `-File`, with a
+relative `GETTY_HOME`, and through the Git Bash forwarding each ended with exit 1, nothing
+on stdout and the one line naming `k13`, nothing created under `GETTY_HOME`; `run-mcp`
+without an entry on Windows: not checked.)
 
 **Download and resume.** Under the install lock the archive downloads to
 `<GETTY_HOME>\runtimes\bun\.downloads\<version>\<target>\<archive>.part`, in process
@@ -964,8 +976,10 @@ legs: the list `-x`, `-x:foo`, `--`, `--%`, `-File`, `-Command`, `x`, `-Command 
 `-NoProfile`, `-ExecutionPolicy`, `Bypass`, `-Verbose`, `-ErrorAction:Stop`, `-Debug`,
 the empty string, `-x:`, `c"d` and `e\` reached the entry unchanged, as a whole, each
 alone and through the Git Bash forwarding (`bootstrap/test/entry-args.test.ts`); the
-polyglot rows: Polyglot, below. Arguments with spaces, quotes, a trailing backslash and
-non-ASCII text: executed, CI 45572032454, before this change.)
+same with `--name`, `--name=value` and `--name=a:b` added to the list: executed, CI
+46055182446, the same legs and test; the polyglot rows: Polyglot, below. Arguments with
+spaces, quotes, a trailing backslash and non-ASCII text: executed, CI 45572032454, before
+this change.)
 
 What `-File` rejects: it makes an argument after the script path that begins with `-`
 a parameter, and binding can fail on one of them in PowerShell before the starter runs,
@@ -1222,17 +1236,30 @@ stdout byte for byte with exit 7, the dash arguments, exit 2 and 7 unchanged, th
 without `CLAUDE_PLUGIN_ROOT` and a starter failure; dash, installed from Homebrew, failed
 there with the one line and exit 1, as documented for a system without `/proc`. Git Bash:
 executed, CI 46035250753, the Windows legs, the same rows, exit 2 included, plus a root
-with backslashes followed by `/bootstrap/getty-bun.cmd` (bytes and exit 7). The
+with backslashes followed by `/bootstrap/getty-bun.cmd` (bytes and exit 7); there Git Bash
+dot-sources this half, which runs `getty-bun.sh` and its forwarding to `getty-bun.ps1`, and
+the dash arguments with `--name`, `--name=value` and `--name=a:b` among them passed
+unchanged: executed, CI 46055182446, the same legs and test. The
 first-word gate, a local run outside the suite with a stub `getty-bun.sh` on Linux, not in
 CI: dash re-ran `. "<root>/..."`, `. '<root>/...'`, `. "$VAR/bootstrap/getty-bun.cmd"` and
 `. "$VAR"/bootstrap/getty-bun.cmd` with their arguments; `. ./side.sh; . "<root>/..." run
 e.js` and `. "<root>/bootstrap/getty-bun.cmd";. ./side.sh run e.js` failed with the one
 line and exit 1, `side.sh` having run once in the first; bash, zsh 5.9 and BusyBox sh with
-`CLAUDE_PLUGIN_ROOT` ran unchanged. The re-run guard, the same kind of local run with dash
+`CLAUDE_PLUGIN_ROOT` ran unchanged. Of these, the `side.sh` line is in the suite: executed,
+CI 46055182446, the linux-x64 and linux-arm64 scenario legs, `bootstrap/test/polyglot.test.ts`
+(dash: `side.sh` ran once, one line, exit 1, nothing on stdout, no request to the mirror);
+the other variants stay the local run. The re-run guard, the same kind of local run with dash
 0.5.12 and bash 5.2.37: with a `bash` on `PATH` that is a link to dash, the line failed
 with the one line and exit 1, where without the guard it never ended (exit 124 under
 `timeout 3`); with the real bash, dash re-ran the line and a stub `getty-bun.sh` got the
-arguments without `GETTY_BUN_POLYGLOT_REEXEC`, as it did under bash and zsh 5.9.)
+arguments without `GETTY_BUN_POLYGLOT_REEXEC`, as it did under bash and zsh 5.9. Linux:
+executed, CI 46055182446, the linux-x64 and linux-arm64 scenario legs,
+`bootstrap/test/polyglot.test.ts`: stdin and stdout byte for byte, the dash arguments
+(`--name`, `--name=value` and `--name=a:b` among them), exit 2 and 7 unchanged, the run
+without `CLAUDE_PLUGIN_ROOT` (not under BusyBox sh, which names a sourced file nowhere)
+and a starter failure under `sh` (dash), dash, bash, BusyBox sh and zsh, zsh installed
+there by CI from that run on (k68), and the re-run guard row (a `bash` on `PATH` that
+execs dash: one line, exit 1, within seconds).)
 
 **Batch side.** `cmd.exe` skips the first line (a label to it), and runs
 
@@ -1254,11 +1281,13 @@ its parenthesised blocks are unreliable there, so the batch part has none of the
 the Windows PowerShell 5.1 and pwsh 7 scenario legs, `bootstrap/test/polyglot.test.ts`:
 the batch side dot-sourced from Windows PowerShell 5.1 and pwsh 7 passed stdin and stdout
 byte for byte with exit 7, the entry's arguments (but `'--%'` and `'-Command x'`, Entry
-arguments above), exit 3 without `CLAUDE_PLUGIN_ROOT` and a starter failure as exit 1;
-`cmd.exe /d /c getty-bun.cmd` passed stdin and stdout byte for byte with exit 7, with no
-argument list. Not checked: an argument list given to `cmd.exe /d /c` directly, exit 2 through
-the PowerShell tail, a host that keeps stdin open through the polyglot, and the cost of
-the extra PowerShell start on a desktop: a windows-developer card.)
+arguments above; `--name`, `--name=value` and `--name=a:b` among them: executed, CI
+46055182446, the same legs and test), exit 3 without `CLAUDE_PLUGIN_ROOT` and a starter
+failure as exit 1; `cmd.exe /d /c getty-bun.cmd` passed stdin and stdout byte for byte
+with exit 7, with no argument list. Not checked: an argument list given to
+`cmd.exe /d /c` directly, exit 2 through the PowerShell tail, a host that keeps stdin
+open through the polyglot, and the cost of the extra PowerShell start on a desktop: a
+windows-developer card.)
 
 **Limits of the batch side.** What the environment around `cmd.exe` can do to the line,
 none of it checked on Windows:

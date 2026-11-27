@@ -366,10 +366,12 @@ starter).
   answered with `{"content":[]}` is no error.
 
 **What `run-mcp` does** (0.2.0, as specified in agent-bun-runtime `docs/plan.md`, "Rework
-after the hub review"; starter side executed locally on Linux `sh`,
-`bootstrap/test/run-mcp.test.ts`: `ready` execs under the same PID, the wait with a
-concurrent `ensure`, the stub transcript, signals, the fallback cases; CI legs pending; not
-run under Claude Code):
+after the hub review"; starter side executed, `bootstrap/test/run-mcp.test.ts`, locally on
+Linux `sh` and in agent-bun-runtime CI 46055182446 at `dce4797`, 23 of 23 jobs green, on
+linux-x64, linux-arm64, `macos-15` and `macos-15-intel` under `sh`: `ready` execs under the
+same PID, the wait with a concurrent `ensure`, the stub transcript with `server/discover`,
+signals, the fallback causes, a missing entry file that gets the stub; not run under Claude
+Code, the hub's live probe follows):
 
 - **Slot `ready`:** exactly `run`. Bun replaces the starter by `exec` under the same PID,
   so the host's signals and end of input reach the server and its exit code passes
@@ -401,7 +403,8 @@ run under Claude Code):
 - **No SDK dependency** is needed for such an entry until the SDK has MCP (phase 5).
 - **Windows is not covered.** An MCP server has no shell form, so the polyglot cannot
   start it, and exec form on a `.cmd` fails with EINVAL (measured by windows-developer,
-  2.1.287); `getty-bun.ps1 run-mcp` fails with one `getty-bun: ` line, exit 1. A plugin
+  2.1.287); `getty-bun.ps1 run-mcp` fails with one `getty-bun: ` line, exit 1 (executed,
+  CI 46055182446 on `windows-latest` under `powershell` and `pwsh`). A plugin
   keeps its server off on Windows (agent-irc keeps its `mcpoff` launcher there); a Windows
   MCP launcher and a job object that ends Bun with its host are later (agent-bun-runtime
   `k13`).

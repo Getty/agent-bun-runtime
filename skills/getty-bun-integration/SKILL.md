@@ -71,7 +71,8 @@ you observed it.
   ([contract.md](references/contract.md), "Starter interface").
 - **Options an entry takes on Windows** have one of three forms only: `-x`, `--name` or
   `--name=value`, with no blank inside; a value that needs a blank goes in an argument of
-  its own. The exceptions above are why.
+  its own. The exceptions above are why. (All three forms passed `-File`, the Git Bash
+  forwarding and the polyglot: executed, agent-bun-runtime CI 46055182446.)
 - **The entry exits 0, 1, or 2 only with `onFailure: "closed"`.** Both hosts read 2 on
   `PreToolUse` and `UserPromptSubmit` as a block, but also act on it elsewhere: on `Stop`
   and `SubagentStop` it keeps the agent working. `"closed"` only on an entry that serves
