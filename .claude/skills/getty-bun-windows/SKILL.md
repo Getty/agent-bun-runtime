@@ -42,8 +42,8 @@ powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 
   `4cc5e8b`, `CHANGELOG.md`): `"command": "powershell.exe"` and the flags, the starter
   path and `run <entry>` in `args`, spawned without a shell: no quoting, and `"shell"`
   is ignored (documented, hooks reference, which shows this call as its Windows example).
-  It serves Windows only and `hooks.json` has no per-OS field, so whether a Claude Code
-  plugin uses it is the plan's open decision.
+  It serves Windows only and `hooks.json` has no per-OS field, so a Claude Code plugin
+  for Windows uses the `.cmd` polyglot in shell form instead (ADR 0010).
 - Codex: `commandWindows` carries the line with the path in double quotes,
   `"${PLUGIN_ROOT}\bootstrap\getty-bun.ps1"`: Codex substitutes `${PLUGIN_ROOT}`
   textually, unquoted, and runs the line in the session shell, by default PowerShell
@@ -52,8 +52,9 @@ powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 
   `cmd` alike. Which shell a real desktop uses: a windows-developer card in phase 3a.
 - `CLAUDE_ENV_FILE` does not apply to hooks that run in PowerShell (documented, hooks
   reference): set no environment variables through `SessionStart`.
-- Entry arguments must not start with `-`: `-File` hands them to PowerShell's parameter
-  binding (README, "Limit: entry arguments").
+- Entry arguments may start with `-` from 0.2.0: the starter reads
+  `[Environment]::GetCommandLineArgs()` after the host's `-File`, not `$args`, which
+  `-File`'s parameter binding re-parses (k51; README, Windows starter, entry arguments).
 
 ## stdin, stdout, exit code
 
