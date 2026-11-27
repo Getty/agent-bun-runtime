@@ -1,0 +1,21 @@
+---
+class: standard
+completed: 2026-11-27T17:30:18Z
+created: 2026-11-27T14:14:41Z
+id: 57
+priority: medium
+started: 2026-11-27T14:44:38Z
+status: done
+tags:
+- docs
+- skills
+- release-0.2.0
+title: 'Contract: detached long-lived child processes'
+updated: 2026-11-27T17:30:18Z
+---
+
+Release 0.2.0 (hub card agent-developer k14). Spec: docs/plan.md "Release 0.2.0", ADR 0011. Item 11. loadguard G4/P5: setsid/detached, nice, file descriptors, RSS.
+
+2026-11-27 15:41 Committed 4965637 (dependencies-and-execution.md detached children); pushed.
+
+Commits on next-0.2.0: 4965637. CI 46040193580 green on 30401e0; reviewers approved; merge into main pending owner
