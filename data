@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-27T15:02:17Z
+id: 61
+priority: low
+status: backlog
+tags:
+- bootstrap
+- posix
+title: 'POSIX starter: orphan download window while a killed starter is not yet reaped'
+updated: 2026-11-27T15:02:17Z
+---
+
+Release 0.2.0 k50 (posix worker): the no-orphan watchdog polls the starter's PID; a killed starter that its parent has not reaped still looks alive, so curl keeps appending to the .part (with a Python parent reaping after 6 s, curl stopped 0.5 s after the reap). The next install may resume a .part another curl still writes; the checksum catches most cases but there is a short window after the hash. Inference, not run. Option: a FIFO-based watchdog. Not a 0.2.0 item.
