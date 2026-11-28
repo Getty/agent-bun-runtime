@@ -104,11 +104,12 @@ without Bun, the harness Bun `.dev/harness/bun` described in the team skill
 
 - Trusted publishing for `Getty/agent-bun-runtime` on npm (provenance, no long-lived
   token), in this order; 0.1.1 is its first publish:
-  1. The publish workflow lands on `main` first: written by the CI worker, pushed by the
-     hub (the deploy key may not push workflows). npm registers its file name, and the
-     file must already exist in `.github/workflows/`.
-  2. Then the trusted publisher on npm for the package, with exactly that workflow file
-     name (only the name, with `.yml` or `.yaml`). `npm stage publish` is always allowed;
+  1. The publish workflow is on `main`: `.github/workflows/publish.yml`. It runs on a
+     pushed `vX.Y.Z` tag, checks the tag against `package.json` and `Changes`, packs with
+     `bun pm pack` and publishes that tarball. npm registers its file name, and the file
+     must already exist in `.github/workflows/`.
+  2. Then the trusted publisher on npm for the package: organization `Getty`, repository
+     `agent-bun-runtime`, workflow `publish.yml`, no environment. `npm stage publish` is always allowed;
      a direct `npm publish` from the workflow is an "allowed action" that has to be
      switched on in that configuration.
   3. Then publish 0.1.1 through the workflow within 2 days: a new configuration that has

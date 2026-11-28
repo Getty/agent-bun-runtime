@@ -1,6 +1,6 @@
 {
   "name": "@getty/agent-bun-runtime",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Shared APIs for Getty agent plugins running on the getty-bun runtime",
   "license": "Artistic-2.0",
   "type": "module",

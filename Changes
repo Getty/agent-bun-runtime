@@ -2,6 +2,10 @@ Revision history for agent-bun-runtime
 
 {{$NEXT}}
 
+0.1.1     2026-11-28 04:34:06Z
+  - .github/workflows/publish.yml: publishes the SDK to npm through
+    trusted publishing when a vX.Y.Z tag is pushed.
+
 0.1.0     2026-11-26 23:35:17Z
   - POSIX starter bootstrap/getty-bun.sh with run, ensure and status:
     installs the pinned Bun on demand under a lock, then runs the given
