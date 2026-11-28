@@ -1,0 +1,66 @@
+name: publish
+
+# Publishes @getty/agent-bun-runtime to npm through trusted publishing (OIDC, no token,
+# provenance attached by npm). Runs on a pushed release tag vX.Y.Z only. npm knows this
+# workflow by its file name, publish.yml: renaming it breaks the trusted publisher.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  HARNESS_BUN_VERSION: "1.4.5"
+
+jobs:
+  publish:
+    name: npm publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.HARNESS_BUN_VERSION }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - name: npm 11.5.1 or later (trusted publishing)
+        run: |
+          npm install -g npm@11
+          npm --version
+      - name: Tag, package.json and Changes agree
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          test "$GITHUB_REF_NAME" = "v$version" || {
+            echo "tag $GITHUB_REF_NAME does not match package.json version $version" >&2
+            exit 1
+          }
+          grep -Eq "^$version[[:space:]]" Changes || {
+            echo "Changes has no stamped entry for $version" >&2
+            exit 1
+          }
+      - name: Build the tarball
+        run: |
+          bun install --frozen-lockfile
+          bun pm pack
+          tarball="getty-agent-bun-runtime-$(node -p 'require("./package.json").version').tgz"
+          tar tzf "$tarball"
+          if tar tzf "$tarball" | grep -Eq '^package/(src|test)/|^package/bunfig\.toml$'; then
+            echo "tarball holds src/, test/ or bunfig.toml" >&2
+            exit 1
+          fi
+          echo "TARBALL=$tarball" >> "$GITHUB_ENV"
+      - name: Publish
+        run: npm publish --access public "$TARBALL"
